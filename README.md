@@ -36,6 +36,7 @@ Needs Python 3.12. [uv](https://docs.astral.sh/uv/) is used if installed; otherw
 make run    # server on http://127.0.0.1:8000 (HOST=0.0.0.0 make run to expose it)
 make dev    # same, but restarts on any change to agentic_colab/ (code, templates, JS, CSS); open dashboards refresh themselves
 make live   # make dev + `git pull --ff-only` every 30 s: for the always-on board machine, so pushes go live by themselves
+scripts/board_loop.sh   # make live under a watchdog: restarts it if it exits, stops answering, or the port is held
 make test   # pytest
 make demo   # fresh server + two EchoAgent runners + sample tasks
 ```

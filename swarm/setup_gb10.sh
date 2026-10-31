@@ -53,7 +53,8 @@ elif [ "$BOARD_DIR" != "$SCRIPT_REPO" ]; then
   run "git -C '$BOARD_DIR' pull --ff-only -q"
 fi
 DB_ENV=""; [ -n "$DB_URL" ] && DB_ENV="DATABASE_URL='$DB_URL' "
-BOARD_LOOP="cd '$BOARD_DIR' && while true; do ${DB_ENV}HOST=0.0.0.0 SWARM_END=$SWARM_END make live; sleep 5; done"
+# scripts/board_loop.sh restarts the board when it exits, stops answering, or a leftover holds the port.
+BOARD_LOOP="cd '$BOARD_DIR' && ${DB_ENV}HOST=0.0.0.0 SWARM_END=$SWARM_END scripts/board_loop.sh"
 
 step "3/7 Share this machine with the swarm (Tailscale SSH as the 'swarm' user, mode $SHARE_MODE)"
 if [ "$SHARE_MODE" = "none" ]; then echo "skipped (SHARE_MODE=none)"
@@ -71,7 +72,7 @@ run "sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sle
 step "5/7 Board: restart on crash and on reboot, keep pulling main"
 if [ $SKIP_BOARD -eq 1 ]; then
   echo "skipped (board not started from a checkout here)"
-elif tmux has-session -t board 2>/dev/null && tmux list-panes -t board -F '#{pane_start_command}' | grep -q "while true"; then
+elif tmux has-session -t board 2>/dev/null && tmux list-panes -t board -F '#{pane_start_command}' | grep -q "board_loop.sh"; then
   echo "tmux session 'board' already runs the auto-restart loop; leaving it"
 elif tmux has-session -t board 2>/dev/null && [ $RESTART_BOARD -eq 0 ]; then
   echo "tmux session 'board' runs a board started by hand (no auto-restart, no SWARM_END)."
