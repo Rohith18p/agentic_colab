@@ -14,6 +14,7 @@
 # Hot reload: the agent pulls this repo before every shift (AUTO_UPDATE=1) and
 # restarts itself if runner code changed; the playbook is re-read every shift;
 # ~/swarm-work/<name>/agent.env (KEY=VALUE) changes the model or budgets live.
+# Requires SWARM_END (the agent stops for good then) and runs swarm/check_security.sh first.
 set -euo pipefail
 
 BOARD="${1:?usage: swarm/start_agent.sh <board-url> <agent-name> [skills]}"
@@ -22,6 +23,15 @@ SKILLS="${3:-}"
 BOARD="${BOARD%/}"
 cd "$(dirname "$0")/.."
 
+if [ -z "${SWARM_END:-}" ]; then
+  echo "Set SWARM_END first (the time the swarm stops for good), e.g.:"
+  echo "  export SWARM_END=2026-11-01T08:00:00-05:00"
+  exit 1
+fi
+if [ "${SKIP_SECURITY_CHECK:-0}" != "1" ] && ! swarm/check_security.sh "$BOARD"; then
+  echo "Not starting: fix the failed checks above (or SKIP_SECURITY_CHECK=1 for a local test only)."
+  exit 1
+fi
 if ! curl -fsS --max-time 5 "$BOARD/api/state" >/dev/null; then
   echo "Cannot reach the board at $BOARD."
   echo "Check that this machine is on the tailnet (tailscale status) and the board is running with HOST=0.0.0.0."
@@ -48,6 +58,6 @@ fi
 export WORKSPACE_URL="$BOARD" AGENT_NAME="$NAME" AGENT_SKILLS="$SKILLS" RUNNER_AGENT=claude
 export AGENT_OWNER="${AGENT_OWNER:-$USER}"
 export STEP_SECONDS="${STEP_SECONDS:-120}" SHIFT_BUDGET_USD="${SHIFT_BUDGET_USD:-1.5}"
-export TOTAL_BUDGET_USD="${TOTAL_BUDGET_USD:-60}" AUTO_UPDATE="${AUTO_UPDATE:-1}"
+export TOTAL_BUDGET_USD="${TOTAL_BUDGET_USD:-60}" AUTO_UPDATE="${AUTO_UPDATE:-1}" SWARM_END
 echo "Starting $NAME (skills: ${SKILLS:-none}) against $BOARD. Work dir: ${AGENT_WORKDIR:-$HOME/swarm-work/$NAME}"
 exec env -u PYTHONPATH .venv/bin/python -m runner

@@ -75,6 +75,10 @@ class Runner:
         async with WorkspaceClient(self.workspace_url) as client:
             ctx = AgentContext(client, self.agent_name)
             while not self._stop.is_set():
+                if getattr(self.agent, "done", False):  # the agent says it is finished for good
+                    log.info("%s: agent finished; stopping the runner", self.agent_name)
+                    self._stop.set()
+                    break
                 try:
                     if not self.registered:
                         await self._register(client, ctx)

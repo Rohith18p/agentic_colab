@@ -44,3 +44,23 @@ async def test_boot_id_lets_dashboards_detect_restarts(live_server):
             seen = [await anext(lines) for _ in range(5)]
     assert "event: hello" in seen and f'data: {{"boot_id": "{boot}"}}' in seen
     assert "compute" in live_server.ws.snapshot()["settings"]["channels"]
+
+
+def test_agents_cannot_act_after_swarm_end(settings, tmp_path):
+    from datetime import timedelta
+
+    from agentic_colab.models import utcnow
+    from agentic_colab.workspace import Workspace
+
+    settings.swarm_end = utcnow() + timedelta(minutes=5)
+    ws = Workspace(settings)
+    ws.register_agent("alpha")
+    task = ws.create_task("alpha", "agent", "before the end")
+    later = settings.swarm_end + timedelta(seconds=1)
+    with pytest.raises(WorkspaceError) as e:
+        ws.claim_task("alpha", task["id"], now=later)
+    assert e.value.code == "swarm_ended"
+    with pytest.raises(WorkspaceError):
+        ws.post_message("alpha", "agent", "status", "still here?", now=later)
+    assert ws.post_message("lead", "human", "human_input", "wrap-up note", now=later)["author_name"] == "lead"
+    assert ws.list_messages() and ws.snapshot()["settings"]["swarm_end"]

@@ -128,9 +128,15 @@ class Workspace:
         return agent
 
     def _active_agent(self, s: Session, name: str, now: datetime) -> Agent:
-        """Look up an agent that is about to act. Paused agents are refused."""
+        """Look up an agent that is about to act. Paused agents, and every agent after SWARM_END, are refused."""
         agent = self._get_agent(s, name)
         agent.last_heartbeat = now
+        if self.settings.swarm_end is not None and now >= self.settings.swarm_end:
+            raise WorkspaceError(
+                "swarm_ended",
+                f"The swarm ended at {iso(self.settings.swarm_end)}; agents can no longer change anything. Stop now.",
+                status=423,
+            )
         if agent.paused:
             raise WorkspaceError(
                 "agent_paused",
@@ -721,5 +727,6 @@ class Workspace:
                 "lease_seconds": self.settings.lease_seconds,
                 "offline_after_seconds": self.settings.offline_after_seconds,
                 "channels": list(CHANNELS),
+                "swarm_end": iso(self.settings.swarm_end),
             },
         }

@@ -158,10 +158,20 @@ There is no central compute; each agent brings its own machine.
 
   Don't ask permission for science choices. Make them, say why, and move on.
 
+## Network and shutdown
+
+- The machines are connected through a private Tailscale network.
+- **Never expose anything to the internet:** no tunnels, port forwarding, ngrok, cloudflared or Tailscale Funnel/Serve.
+- **A service you share** binds to your Tailscale IP (`tailscale ip -4`) on a port from 8001 to 8099. Other ports are blocked between machines anyway.
+- **Label every Docker container** you start with `--label swarm=<your agent name>`.
+- **Record every background process** you start in `NOTEBOOK.md`, so humans can shut everything down at the end.
+- **The swarm has a hard end time** (`SWARM_END`). When any tool returns `swarm_ended`, stop immediately.
+
 ## Hard rules
 
 - Never put API keys, tokens or passwords on the board. Your keys are in your environment.
 - Never look for, read or train on the sealed test data, and never probe the referee to recover planted answers.
 - Stay within your shift budget and the charter's compute limits.
 - Don't delete or overwrite other agents' files or results.
-- If you get `agent_paused`, stop.
+- If you get `agent_paused` or `swarm_ended`, stop.
+- Touch only your working directory, the shared repo and store, and the services announced in `#compute`. Don't access other files on the machine or other machines.

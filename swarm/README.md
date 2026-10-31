@@ -9,6 +9,9 @@ Every agent gets the same goal and the same playbook. Nobody assigns roles or ex
 | `referee/referee.py` | Scores agents' measurements on planted clips without revealing the answers |
 | `../runner/claude_code.py` | The harness: one runner step = one headless Claude Code shift |
 | `start_agent.sh` | One command to start an agent on any machine that can reach the board |
+| `tailscale-policy.hujson` | The tailnet access policy: agent machines reach only the board, the referee and ports 8001–8099 on each other |
+| `check_security.sh` | Verifies a machine's setup (tailnet, tag, blocked ports, binding, `SWARM_END`); `start_agent.sh` runs it |
+| `offboard.sh` | Stops everything swarm-related on a machine and logs it out of the tailnet |
 | `referee/make_planted.py` | Renders planted clips with known physics (drops, bounces, pendulums, slides) and writes the answers file |
 
 ## Who does what (humans)
@@ -25,10 +28,10 @@ Every agent gets the same goal and the same playbook. Nobody assigns roles or ex
 
 ## Start checklist
 
-### 1. Board (always-on machine, on the tailnet)
+### 1. Board (always-on machine, on the tailnet; see "Network, security and shutdown" first)
 ```bash
 git clone https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab
-HOST=0.0.0.0 make live       # dashboard + MCP on :8000, hot reload, pulls new commits every 30 s
+HOST=$(tailscale ip -4) SWARM_END=$SWARM_END make live   # dashboard + MCP on :8000, hot reload, pulls every 30 s
 ```
 `make live` keeps the board current without anyone logging in:
 - a push to the branch reaches the board within about 30 s;
@@ -59,7 +62,7 @@ State lives in `data/workspace.db`, so restarts lose nothing. Use `make run` for
 3. **Start the referee:**
    ```bash
    python swarm/referee/referee.py --manifest planted.json --answers answers.json \
-       --port 8100 --board-url http://<board-host>:8000
+       --host $(tailscale ip -4) --port 8100 --until $SWARM_END --board-url http://<board-host>:8000
    ```
    Put `http://<referee-host>:8100` in `charter/compute.md`.
 
@@ -72,10 +75,11 @@ python scripts/seed_swarm.py --url http://<board-host>:8000 --as <your-name> --k
 - To change the playbook, edit `AGENT_PROMPT.md` and pull on the agent machines. The next shift picks it up.
 
 ### 5. Every agent owner: start an agent
-Use a machine or container where an agent with a shell is acceptable, and where the agent can install Python packages. Install Claude Code and authenticate it: either set `ANTHROPIC_API_KEY` in the environment (never on the board) or log in once by running `claude`. The machine must reach the board (see "Agents on different computers" below).
+Use a machine where an agent with a shell is acceptable, ideally a separate Linux user or a VM, and where the agent can install Python packages. Install Claude Code and authenticate it: either set `ANTHROPIC_API_KEY` in the environment (never on the board) or log in once by running `claude`. The machine must be on the tailnet with the agent key (see "Network, security and shutdown" below).
 
 ```bash
 git clone https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab
+export SWARM_END=2026-11-01T08:00:00-05:00     # required; the agent stops for good then
 
 # Smoke test: exactly one shift. Watch it on the dashboard.
 MAX_SHIFTS=1 swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmos-gpu
@@ -84,11 +88,12 @@ MAX_SHIFTS=1 swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmos-gpu
 tmux new -s <you>-1 'swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmos-gpu'
 ```
 
-`start_agent.sh` does four things:
-1. Checks that the board is reachable.
-2. Checks that Claude Code is installed.
-3. Creates `.venv` with the runner's one dependency.
-4. Runs the agent with `STEP_SECONDS=120`, `SHIFT_BUDGET_USD=1.5` and `TOTAL_BUDGET_USD=60`. Override any of them with environment variables.
+`start_agent.sh` does five things:
+1. Refuses to start without `SWARM_END`, or if `check_security.sh` fails.
+2. Checks that the board is reachable.
+3. Checks that Claude Code is installed.
+4. Creates `.venv` with the runner's one dependency.
+5. Runs the agent with `STEP_SECONDS=120`, `SHIFT_BUDGET_USD=1.5` and `TOTAL_BUDGET_USD=60`. Override any of them with environment variables.
 - `AGENT_SKILLS` describes the machine, not a role: `cosmos-gpu`, `isaac-sim`, `cpu-only`, `fine-tune-gpu`. The machine's GPUs are detected and shown on the board automatically.
 - **Change settings live:** create `~/swarm-work/<AGENT_NAME>/agent.env` with lines like `AGENT_MODEL=claude-opus-5-5`, `SHIFT_BUDGET_USD=2` or `TOTAL_BUDGET_USD=80`. The agent applies the file before its next shift, with no restart.
 - **Updates reach every machine:** the agent pulls the repo before every shift (`AUTO_UPDATE=1`). A pushed playbook change applies from the next shift, and a pushed harness change makes the runner restart itself. Pulls are fast-forward only, so local edits are never overwritten. Set `AUTO_UPDATE=0` to opt out.
@@ -102,23 +107,70 @@ tmux new -s <you>-1 'swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmo
 
 **Permissions:** shifts run with `--permission-mode default` and an allow-list of tools: shell, files, web, and the board. Tools that aren't on the list are denied, not prompted. On a throwaway sandbox you can set `PERMISSION_MODE=bypassPermissions`.
 
-## Agents on different computers
-There is one board, and every agent connects to it over the network. Agents never talk to each other directly; everything goes through the board. So any machine that can reach the board's URL can run an agent.
+## Network, security and shutdown
+The machines can be anywhere on the internet. They connect through **Tailscale**, a WireGuard-encrypted private network that works through home routers, campus networks and cloud VMs. Nothing is exposed publicly.
 
-1. **Host the board on a machine that stays up all night.** That can be a desktop, a small cloud VM, or the compute box, but not a laptop that will sleep. Start it with `HOST=0.0.0.0 make run`.
-2. **Put every machine on one private network.** The board has no logins, so don't expose it to the internet. Tailscale is the easiest (see `HOSTING.md`):
-   - one person creates a tailnet and invites the others;
-   - on each laptop or desktop: install Tailscale and log in;
-   - on a cloud VM (Brev, Nebius): `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up --authkey <key>`, using an auth key from the Tailscale admin console;
-   - in a container without root, run `tailscaled --tun=userspace-networking` and check the Tailscale docs.
-3. **Check reachability from each machine:** `curl http://<board-host>.<tailnet>.ts.net:8000/api/state` should print JSON. Then use that URL in `start_agent.sh`.
-4. **Shared services live on the same network.** Any Cosmos endpoint or GPU box a machine shares is announced in `#compute` with its tailnet URL; the referee's URL goes in `charter/compute.md`. Agents on every machine call them by URL.
-5. **Share files through a common place, not local disks.** Agents on different computers can't see each other's files:
-   - **Code and small results:** a shared git repo. Each agent machine needs push access through a token in its environment.
-   - **Clips and checkpoints:** a shared store, such as a private Hugging Face dataset repo (`hf upload` / `hf download`), a bucket, or a folder on the compute box.
+Three layers protect your machines:
+- **Who can join:** only machines holding the team's auth key.
+- **What they can reach:** `tailscale-policy.hujson` lets agent machines reach only the board (8000), the referee (8100), and each other's shared services on 8001–8099. No SSH, no other ports.
+- **When it ends:** a hard end time, `SWARM_END`, plus expiring keys.
 
-   Put both locations in `charter/compute.md`. Findings must link to files there, not to local paths.
-6. **Give every agent a unique `AGENT_NAME`** across all machines, for example `<owner>-1` and `<owner>-2`.
+The board itself has no logins; Tailscale is the lock on the door.
+
+### One-time setup (the lead)
+1. **Create a tailnet just for the hackathon**, for example with a fresh account. Don't use anyone's personal tailnet, because the policy below replaces its access rules.
+2. **Install the policy.** In the admin console, open **Access controls** and paste `swarm/tailscale-policy.hujson`. The admin console runs the policy's built-in tests on save and refuses a policy that lets agents reach anything else.
+3. **Generate two auth keys** (Settings → Keys), each with an expiry of 1–2 days:
+   - **Board key:** tag `tag:swarm-board`, not ephemeral.
+   - **Agent key:** tag `tag:swarm-agent`, *reusable* and *ephemeral*. Ephemeral machines drop off the tailnet by themselves when they go offline.
+
+   Share the keys privately, never on the board.
+4. **Choose the end time.** On Sunday Nov 1, Eastern time is UTC−5, because daylight saving ends at 2 AM that morning:
+   ```bash
+   export SWARM_END=2026-11-01T08:00:00-05:00   # the freeze
+   ```
+
+### Each machine
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --authkey=<board or agent key> --hostname=<short-name>
+```
+On the board machine, bind to the tailnet address only, and give the referee the same end time:
+```bash
+HOST=$(tailscale ip -4) SWARM_END=$SWARM_END make live
+python swarm/referee/referee.py ... --host $(tailscale ip -4) --until $SWARM_END
+swarm/check_security.sh http://<board>.<tailnet>.ts.net:8000 --board
+```
+
+On agent machines, `start_agent.sh` runs `check_security.sh` first and refuses to start until every check passes:
+- Tailscale is connected, with the right tag.
+- Nothing is published through Funnel.
+- The board resolves to a tailnet address.
+- Other ports on the board are blocked.
+- `SWARM_END` is set and in the future.
+
+**Recommended: run agents as a separate Linux user** (`sudo useradd -m swarm && sudo -iu swarm`), or in a VM, not as yourself. Agents have a shell. A separate user can't read your home directory, SSH keys or browser data, and the tailnet policy keeps them away from everyone else's machines.
+
+### Sharing work
+- **Each agent needs a unique `AGENT_NAME`** across all machines, for example `<owner>-1`.
+- **Machines don't share disks.** Code goes in the shared git repo; clips and checkpoints go in a shared store, such as a private Hugging Face dataset repo or a bucket. Put both in `charter/compute.md`. Findings link there, never to local paths.
+- **Shared services** (Cosmos endpoints) bind to the machine's tailnet IP on ports 8001–8099 and are announced in `#compute`.
+
+### When it ends
+1. **At `SWARM_END`, automatically:**
+   - every agent stops its shift and its runner exits;
+   - the board rejects all agent writes (humans can still post, and the dashboard stays readable for the demo);
+   - the referee shuts down;
+   - `make live` stops pulling updates.
+2. **After judging, on every machine:**
+   ```bash
+   swarm/offboard.sh          # dry run: lists what will be stopped
+   swarm/offboard.sh --yes
+   ```
+   This stops the runners, anything still running from `~/swarm-work`, Docker containers labelled `swarm`, and the board, referee and auto-pull. It then logs the machine out of Tailscale.
+3. **Then the lead, once:**
+   - In the admin console, revoke the auth keys and remove any device still listed, or delete the tailnet.
+   - Everyone rotates the API keys their agents used: Anthropic, Gemini, Hugging Face, GitHub.
 
 ## Steering during the run (dashboard)
 - **Needs human:** agents' questions. Answer them there.

@@ -193,6 +193,7 @@ def main() -> None:
     p.add_argument("--min-estimates", type=int, default=10)
     p.add_argument("--limit-per-hour", type=int, default=6)
     p.add_argument("--log", default="referee_submissions.jsonl")
+    p.add_argument("--until", help="shut down at this ISO time with offset, e.g. 2026-11-01T08:00:00-05:00")
     args = p.parse_args()
 
     manifest = json.loads(Path(args.manifest).read_text())
@@ -205,6 +206,13 @@ def main() -> None:
                   board_url=args.board_url, log_path=Path(args.log))
     server = ThreadingHTTPServer((args.host, args.port), make_handler(ref))
     print(f"referee on http://{args.host}:{args.port} with {len(answers)} planted clips")
+    if args.until:
+        end = datetime.fromisoformat(args.until)
+        if end.tzinfo is None:
+            raise SystemExit("--until needs a UTC offset, e.g. 2026-11-01T08:00:00-05:00")
+        delay = max(0.0, (end - datetime.now(timezone.utc)).total_seconds())
+        threading.Timer(delay, server.shutdown).start()
+        print(f"shutting down at {end.isoformat()}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

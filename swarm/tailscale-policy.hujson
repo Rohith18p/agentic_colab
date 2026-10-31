@@ -1,0 +1,38 @@
+// Tailnet policy for the hackathon swarm.
+//
+// Use it in a tailnet created only for the hackathon. Paste it into the Tailscale admin
+// console under Access controls. It replaces the default allow-all policy, so anything
+// not listed here is denied. The "tests" block is checked when you save: if a rule
+// lets an agent machine reach something it shouldn't, the save is rejected.
+//
+// Machines: the always-on board machine is tagged tag:swarm-board; every machine that
+// runs agents is tagged tag:swarm-agent (both via tagged auth keys; see swarm/README.md).
+{
+	"tagOwners": {
+		"tag:swarm-board": ["autogroup:admin"],
+		"tag:swarm-agent": ["autogroup:admin"],
+	},
+
+	"acls": [
+		// Dashboard and agent API (8000) and the planted-case referee (8100), on the board machine only.
+		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent"], "dst": ["tag:swarm-board:8000,8100"]},
+
+		// Services machines share with each other (e.g. a Cosmos3-Nano endpoint), on ports 8001-8099 only.
+		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent"], "dst": ["tag:swarm-agent:8001-8099"]},
+	],
+
+	// No Tailscale SSH: nobody, human or agent, gets a shell on another machine through the tailnet.
+	"ssh": [],
+
+	"tests": [
+		{
+			"src":    "tag:swarm-agent",
+			"accept": ["tag:swarm-board:8000", "tag:swarm-board:8100", "tag:swarm-agent:8001", "tag:swarm-agent:8099"],
+			"deny":   ["tag:swarm-board:22", "tag:swarm-board:8001", "tag:swarm-agent:22", "tag:swarm-agent:8000", "tag:swarm-agent:5432"],
+		},
+		{
+			"src":  "tag:swarm-board",
+			"deny": ["tag:swarm-agent:22", "tag:swarm-agent:8001"],
+		},
+	],
+}

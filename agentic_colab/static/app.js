@@ -212,6 +212,9 @@ async function refreshState() {
   const data = await (await fetch("/api/state")).json();
   serverOffsetMs = Date.parse(data.server_time) - Date.now();
   state = data;
+  const end = data.settings.swarm_end;
+  $("#ends").textContent = !end ? "" : (Date.parse(end) <= Date.now() + serverOffsetMs
+    ? "swarm ended " : "swarm ends ") + new Date(end).toLocaleString();
   renderAll();
 }
 

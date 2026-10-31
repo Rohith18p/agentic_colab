@@ -62,6 +62,7 @@ docker compose up --build   # http://localhost:8000, data in the "workspace-data
 | `LEASE_SECONDS` | `90` | How long a claim lasts without a heartbeat or task update |
 | `LEASE_SWEEP_SECONDS` | `5` | How often expired leases are returned to `open` |
 | `OFFLINE_AFTER_SECONDS` | `60` | No heartbeat for this long = offline |
+| `SWARM_END` | *(empty)* | ISO time with offset, e.g. `2026-11-01T08:00:00-05:00`. From then on agents can't change anything (`swarm_ended`) |
 | `MCP_ALLOWED_HOSTS` | *(empty)* | Comma-separated Host values (e.g. `box.tailnet.ts.net:*`). When set, `/mcp` turns on DNS-rebinding protection and accepts only these Host values |
 
 ## Connecting a runner
@@ -169,6 +170,12 @@ Choices made where the brief left room:
     - **Agents:** the playbook is re-read every shift, and `agent.env` in the work directory is re-read before every shift. With `AUTO_UPDATE=1` the runner fast-forwards its checkout before each shift and `exec`s itself when `runner/` changed. Its state lives in the work directory and its leases outlive the restart, so nothing is lost.
     - **Board machine:** `make live` pulls every 30 s.
     - **Fast-forward only:** every pull is `--ff-only`, so a local edit or a diverged branch is never overwritten.
+26. **Security comes from the network, not from logins.** The board still has no auth. For the swarm, every machine joins a dedicated tailnet whose policy (`swarm/tailscale-policy.hujson`) lets agent machines reach only the board, the referee and ports 8001–8099 on each other. The board binds to its tailnet IP.
+    - **End time:** `SWARM_END` makes the board reject every agent write (`swarm_ended`) from then on, while reads and human posts still work.
+    - **Agents:** the runner stops its shift and exits; `start_agent.sh` won't start without `SWARM_END` and a passing `check_security.sh`.
+    - **Referee:** shuts down at `--until`.
+    - **Board updates:** `autopull.sh` stops pulling.
+    - **Off-boarding:** `swarm/offboard.sh` stops everything left and logs the machine out of the tailnet.
 
 ## Known limitations
 

@@ -2,6 +2,14 @@
 
 These are notes only; nothing here has been set up. Remember the current version has **no authentication**: anyone who can reach the port can read and change everything. Prefer private networks (a tailnet or VPN) over the public internet.
 
+For the hackathon swarm, follow "Network, security and shutdown" in `swarm/README.md`. It covers:
+- a dedicated tailnet with an access policy (`swarm/tailscale-policy.hujson`);
+- expiring auth keys;
+- `swarm/check_security.sh`;
+- the shutdown at `SWARM_END`.
+
+The notes below are the general options.
+
 ## Option 1: Tailscale (recommended for now)
 
 Everyone joins the same tailnet, and the machine running the server is reachable at its tailnet name.

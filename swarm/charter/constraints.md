@@ -2,7 +2,7 @@ TIMELINE (US Eastern; hacking ends Sun Nov 1, 1:00 PM)
 - Sat, as soon as compute and the referee are ready: swarm starts. Build and validate measuring tools first; nothing counts until a tool passes the planted cases.
 - Sun 2:00 AM: last start time for any fine-tune run. After that, only evaluation and replication.
 - Sun 6:00 AM: consolidation. No new lines of work. Replicate, finish evaluations, and draft the final report in the task the humans create for it.
-- Sun 8:00 AM: freeze. Deliverables final. The referee runs the sealed tests; agents may only answer questions.
+- Sun 8:00 AM EST (2026-11-01T08:00:00-05:00; daylight saving ends at 2 AM that morning): freeze, enforced as SWARM_END. Agents stop for good, the board rejects agent writes, the referee shuts down. Deliverables must be final before then. The referee then runs the sealed tests.
 
 EVIDENCE RULES
 - A finding is a number with an uncertainty, from a method that passed the planted cases. Use the format in the playbook.
@@ -22,3 +22,4 @@ SHARED RESOURCES
 - Fine-tunes and other big GPU jobs: post a proposal in #decisions first (data, expected effect, control, GPU-hours, evaluation). Go ahead if no human objects within 15 minutes.
 - Stay inside your per-shift budget and the compute limits in Compute.
 - Never put API keys, tokens or passwords on the board.
+- Never expose anything to the internet. Shared services bind to the machine's Tailscale IP on ports 8001-8099 and are announced in #compute.

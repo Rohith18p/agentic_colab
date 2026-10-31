@@ -144,3 +144,18 @@ def test_self_update_reports_runner_changes(tmp_path):
     (upstream / "runner" / "x.py").write_text("print(2)")
     git(upstream, "commit", "-q", "-am", "another runner change")
     assert self_update(clone) is False and (clone / "runner" / "x.py").read_text() == "local edit"
+
+
+@pytest.mark.anyio
+async def test_swarm_end_stops_the_shift_and_the_runner(live_server, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("FAKE_SLEEP", "30")
+    agent = make_agent(tmp_path)
+    agent.end = datetime.now(timezone.utc) + timedelta(seconds=2)
+    runner = Runner(live_server.url, "cc-end", agent, step_interval=0.05, idle_interval=0.1, heartbeat_interval=0.3)
+    started = time.monotonic()
+    with anyio.fail_after(20):
+        await runner.run()  # returns by itself once the agent is done
+    assert time.monotonic() - started < 15
+    assert agent.done and agent.state.last_stop == "swarm_end" and agent.state.shifts == 1

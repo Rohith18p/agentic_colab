@@ -32,6 +32,8 @@ Environment (all optional except what the Runner needs):
   ALLOWED_TOOLS        Claude Code --allowedTools (default: shell, files, web, workspace)
   AGENT_EXTRA_ARGS     extra Claude Code arguments, shell-quoted
   AUTO_UPDATE          "1" to pull the repo before each shift and restart on runner/ changes
+  SWARM_END            ISO time with offset (e.g. 2026-11-01T08:00:00-05:00): stop any running
+                       shift, start no more, and exit the runner
 """
 
 from __future__ import annotations
@@ -81,7 +83,7 @@ only memory besides the board.
 class ShiftResult:
     exit_code: int | None = None
     cost_usd: float = 0.0
-    stopped: str | None = None  # "paused" or "timeout" when the harness stopped it
+    stopped: str | None = None  # "paused", "timeout" or "swarm_end" when the harness stopped it
     summary: str = ""
 
 
@@ -103,6 +105,16 @@ def _optional(parse):
     return lambda value: parse(value) if value else None
 
 
+def parse_end(value: str | None) -> datetime | None:
+    """SWARM_END as an aware datetime; it must carry a UTC offset."""
+    if not value:
+        return None
+    end = datetime.fromisoformat(value)
+    if end.tzinfo is None:
+        raise ValueError(f"SWARM_END needs a UTC offset, e.g. 2026-11-01T08:00:00-05:00 (got {value!r})")
+    return end
+
+
 # Settings that agent.env may change between shifts: env name -> (attribute, parser).
 HOT_SETTINGS = {
     "AGENT_MODEL": ("model", str),
@@ -113,6 +125,7 @@ HOT_SETTINGS = {
     "PERMISSION_MODE": ("permission_mode", str),
     "ALLOWED_TOOLS": ("allowed_tools", str),
     "AGENT_EXTRA_ARGS": ("extra_args", shlex.split),
+    "SWARM_END": ("end", parse_end),
 }
 
 
@@ -183,6 +196,7 @@ class ClaudeCodeAgent(Agent):
         pause_poll_seconds: float = 10.0,
         auto_update: bool = False,
         repo_root: Path | str | None = None,
+        end: datetime | None = None,
     ) -> None:
         self.command = command or ["claude"]
         self.model = model
@@ -199,6 +213,8 @@ class ClaudeCodeAgent(Agent):
         self.pause_poll_seconds = pause_poll_seconds
         self.auto_update = auto_update
         self.repo_root = Path(repo_root) if repo_root else REPO_ROOT
+        self.end = end
+        self.done = False  # set at SWARM_END; the Runner then stops
         self.state = HarnessState()
         self._announced_stop = False
         self._env_file_mtime: float | None = None
@@ -220,6 +236,7 @@ class ClaudeCodeAgent(Agent):
             allowed_tools=os.environ.get("ALLOWED_TOOLS", DEFAULT_TOOLS),
             extra_args=shlex.split(os.environ.get("AGENT_EXTRA_ARGS", "")),
             auto_update=os.environ.get("AUTO_UPDATE") == "1",
+            end=parse_end(os.environ.get("SWARM_END")),
         )
 
     # ------------------------------------------------------------------ files
@@ -277,7 +294,7 @@ class ClaudeCodeAgent(Agent):
             try:
                 new = parse(value)
             except ValueError:
-                log.warning("%s: ignoring %s=%r in %s", agent_name, key, value, path)
+                log.warning("%s: ignoring %s=%r in %s", agent_name, key, value, path)  # e.g. a bad SWARM_END
                 continue
             if getattr(self, attr) != new:
                 setattr(self, attr, new)
@@ -285,6 +302,9 @@ class ClaudeCodeAgent(Agent):
         if changed:
             log.info("%s: settings from agent.env: %s", agent_name, changed)
             self._announced_stop = False  # a raised limit lets the agent start shifts again
+
+    def _past_end(self) -> bool:
+        return self.end is not None and datetime.now(timezone.utc) >= self.end
 
     def _out_of_budget(self) -> str | None:
         if self.max_shifts is not None and self.state.shifts >= self.max_shifts:
@@ -298,6 +318,10 @@ class ClaudeCodeAgent(Agent):
             log.info("%s: runner code changed; restarting the runner", ctx.agent_name)
             os.execv(sys.executable, [sys.executable, "-m", "runner"])
         self._reload_settings(ctx.agent_name)
+        if self._past_end():
+            log.warning("%s: SWARM_END (%s) has passed; stopping for good", ctx.agent_name, self.end.isoformat())
+            self.done = True
+            return False
         reason = self._out_of_budget()
         if reason:
             if not self._announced_stop:
@@ -411,6 +435,11 @@ do it, report it on the board, update NOTEBOOK.md, and end the shift.
                 async with WorkspaceClient(ctx.client.url) as client:
                     while True:
                         await anyio.sleep(self.pause_poll_seconds)
+                        if self._past_end():
+                            log.warning("%s: SWARM_END reached; stopping the shift", ctx.agent_name)
+                            result.stopped = "swarm_end"
+                            await self._terminate(proc)
+                            return
                         try:
                             control = await client.call("get_control_state", agent_name=ctx.agent_name)
                         except (WorkspaceUnreachable, ToolCallError):
