@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agentic_colab</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>agentic_colab</h1>
+  <span id="live" class="pill off" title="Live updates">offline</span>
+  <span class="spacer"></span>
+  <span>You are <b id="me">?</b> <button id="change-name" class="link">change</button></span>
+</header>
+
+<dialog id="name-dialog">
+  <form method="dialog" id="name-form">
+    <h2>Welcome</h2>
+    <p>Pick a display name. Agents and teammates will see it next to your messages.</p>
+    <input id="name-input" required maxlength="100" placeholder="e.g. Rohith" autofocus>
+    <button type="submit">Continue</button>
+  </form>
+</dialog>
+
+<main>
+  <section id="needs-human" class="panel">
+    <h2>Needs human <span id="nh-count" class="count"></span></h2>
+    <div id="nh-list"><p class="muted">No open questions.</p></div>
+  </section>
+
+  <section id="agents" class="panel">
+    <h2>Agents</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Owner / machine</th><th>Status</th><th>Task</th><th>Approach</th><th>Last heartbeat</th><th></th></tr></thead>
+      <tbody id="agent-rows"><tr><td colspan="7" class="muted">No agents yet.</td></tr></tbody>
+    </table>
+  </section>
+
+  <section id="tasks" class="panel">
+    <h2>Task board</h2>
+    <details>
+      <summary>New task</summary>
+      <form id="task-form" class="stack">
+        <input name="title" placeholder="Title" required maxlength="300">
+        <textarea name="description" rows="2" placeholder="Description (optional; include [ask] to have EchoAgent ask a human first)"></textarea>
+        <input name="parent_id" type="number" min="1" placeholder="Parent task id (optional)">
+        <button type="submit">Create task</button>
+      </form>
+    </details>
+    <div id="board" class="board"></div>
+  </section>
+
+  <section id="messages" class="panel">
+    <h2>Message board</h2>
+    <div class="msg-layout">
+      <nav id="threads"></nav>
+      <div class="thread">
+        <div id="thread-header"></div>
+        <div id="message-list" class="message-list"></div>
+        <form id="message-form" class="stack">
+          <div id="reply-indicator" class="muted" hidden></div>
+          <div class="row">
+            <select name="type">
+              <option value="human_input">human_input</option>
+              <option value="decision">decision</option>
+              <option value="proposal">proposal</option>
+              <option value="question">question</option>
+              <option value="status">status</option>
+            </select>
+            <span class="muted">Use @name to mention an agent.</span>
+          </div>
+          <textarea name="body" rows="2" placeholder="Write a message…" required></textarea>
+          <button type="submit">Post</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section id="charter" class="panel">
+    <h2>Charter <span id="charter-version" class="muted"></span></h2>
+    <p class="warning">⚠ {{ charter_warning }}</p>
+    <div id="charter-view"></div>
+    <form id="charter-form" class="stack" hidden>
+      <label>Objective <textarea name="objective" rows="3"></textarea></label>
+      <label>Constraints <textarea name="constraints" rows="3"></textarea></label>
+      <label>Libraries <textarea name="libraries" rows="2"></textarea></label>
+      <label>Compute available <textarea name="compute" rows="2"></textarea></label>
+      <label>Notes <textarea name="notes" rows="3"></textarea></label>
+      <div class="row"><button type="submit">Save new version</button> <button type="button" id="charter-cancel">Cancel</button></div>
+    </form>
+    <div class="row">
+      <button id="charter-edit">Edit</button>
+      <button id="charter-history-btn">History</button>
+    </div>
+    <div id="charter-history" hidden></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
