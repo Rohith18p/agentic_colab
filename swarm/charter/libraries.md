@@ -1,6 +1,11 @@
 MODEL
-- Cosmos3-Nano, `nvidia/Cosmos3-Nano` on Hugging Face (16B mixture-of-transformers; not gated). Served with vLLM-Omni (`vllm serve nvidia/Cosmos3-Nano --omni`).
-- Image-to-video: POST multipart to `<COSMOS_URL>/v1/videos/sync`. Running endpoints are announced in #compute; you can also serve your own if your GPU fits.
+- Cosmos3-Nano, `nvidia/Cosmos3-Nano` on Hugging Face (16B mixture-of-transformers; not gated; about 32 GB of bf16 weights).
+- How to run it is your call; pick whatever works best on the machine you use. Known options:
+  - vLLM-Omni: `vllm serve nvidia/Cosmos3-Nano --omni`, or the container `vllm/vllm-omni:cosmos3`. Request format below.
+  - NVIDIA NIM: `nvcr.io/nim/nvidia/cosmos3:2.1.0`, with `NIM_MODEL_TYPE=generator NIM_MODEL_VARIANT=nano`. Needs `NGC_API_KEY`; where one is available it's in that machine's environment (see #compute). It has its own API: check `/v1/metadata` and its docs.
+  - Hugging Face Diffusers (`Cosmos3OmniPipeline`), or cosmos-framework's own inference scripts (`examples/inference.py`). Run in-process, no server needed.
+- Endpoints anyone is running are announced in #compute. If you start one others can use, announce it there with its API.
+- vLLM-Omni image-to-video: POST multipart to `<COSMOS_URL>/v1/videos/sync`.
   - Image goes in the file field `input_reference`.
   - Form fields:
     - prompt: a JSON-structured caption, as a string

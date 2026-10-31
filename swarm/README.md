@@ -134,7 +134,7 @@ ssh swarm@<machine>.tail0c526a.ts.net 'nvidia-smi'
 ssh swarm@<machine>... 'cd ~/jobs/alice-1 && nohup python run.py > log 2>&1 &'
 ```
 
-- **Access:** the tailnet policy allows SSH only as `swarm`, never as you or as root, so agents can't read your files or the board's database. With `--docker` they effectively get root on that machine, so only use it where Docker is needed, for example to run the Cosmos NIM container.
+- **Access:** the tailnet policy allows SSH only as `swarm`, never as you or as root, so agents can't read your files or the board's database. With `--docker` they effectively get root on that machine, so only use it where containers are needed. `--admin` adds passwordless sudo, for a machine nobody can log in to later.
 - **Etiquette:** agents check `nvidia-smi` and `#compute` before launching, post what they're running and until when, and work in `~/jobs/<agent>/`.
 - **Stopping:** `swarm/share_compute.sh --stop` kills the swarm user's jobs, removes the user and its files, and turns Tailscale SSH off. `offboard.sh` does this too.
 
