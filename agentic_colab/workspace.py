@@ -264,7 +264,9 @@ class Workspace:
             agent.owner_name = owner_name or agent.owner_name or ""
             agent.machine = machine or agent.machine or ""
             if skills is not None:
-                agent.skills = list(skills)
+                # Merge, don't replace: a runner restart re-registers with its launch-time tags,
+                # and must not wipe tags the agent added itself (update_skills removes tags).
+                agent.skills = _dedupe(list(agent.skills or []) + list(skills))
             agent.last_heartbeat = now
             s.flush()
             self._emit(
@@ -318,6 +320,25 @@ class Workspace:
                 "leases_extended": extended,
                 "lease_expires_at": iso(self._lease_until(now)) if extended else None,
             }
+
+    def update_skills(
+        self,
+        name: str,
+        add: list[str] | None = None,
+        remove: list[str] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """An agent adds or removes its own skill tags (what its machine can do)."""
+        now = now or utcnow()
+        with self._tx() as s:
+            agent = self._active_agent(s, name, now)
+            drop = {t.strip().lower() for t in (remove or []) if t.strip()}
+            kept = [t for t in (agent.skills or []) if t.lower() not in drop]
+            new = _dedupe(kept + [t.strip()[:64] for t in (add or []) if t.strip()])
+            if new != (agent.skills or []):
+                agent.skills = new
+                self._emit(s, name, "agent", "agent.skills", {"name": name, "skills": new})
+            return self._agent_dict(agent, now)
 
     def get_control_state(self, name: str) -> dict[str, Any]:
         with self._tx() as s:

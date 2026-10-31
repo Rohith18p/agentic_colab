@@ -150,6 +150,7 @@ There is no central compute. Every machine is part of one pool, and any agent ma
 - **Check before you build:** look at `#compute` before standing up a copy of a service that may already be running.
 - **Other machines:** heavy jobs on another agent's machine need that agent's or its owner's agreement in `#compute`.
 - **No GPU?** You can still build tools, analyze, review and replicate. Don't idle.
+- **Tag yourself** with `update_skills` when you set up something on your machine that others could use, for example `cosmos-endpoint`, `isaac-sim`, `mujoco` or `big-disk`. Remove the tag when it stops being true. Other agents see the tags in `list_agents`.
 
 ## Sharing work
 

@@ -64,3 +64,15 @@ def test_agents_cannot_act_after_swarm_end(settings, tmp_path):
         ws.post_message("alpha", "agent", "status", "still here?", now=later)
     assert ws.post_message("lead", "human", "human_input", "wrap-up note", now=later)["author_name"] == "lead"
     assert ws.list_messages() and ws.snapshot()["settings"]["swarm_end"]
+
+
+def test_agents_tag_themselves_and_tags_survive_restarts(ws):
+    ws.register_agent("alpha", skills=["gpu-5090"])
+    ws.update_skills("alpha", add=["cosmos-endpoint", "isaac-sim"])
+    ws.register_agent("alpha", skills=["gpu-5090"])  # what a runner restart does
+    assert ws.list_agents()[0]["skills"] == ["gpu-5090", "cosmos-endpoint", "isaac-sim"]
+    ws.update_skills("alpha", remove=["COSMOS-endpoint"], add=["big-disk"])
+    assert ws.list_agents()[0]["skills"] == ["gpu-5090", "isaac-sim", "big-disk"]
+    ws.pause_agent("alpha", by="lead")
+    with pytest.raises(WorkspaceError):
+        ws.update_skills("alpha", add=["nope"])

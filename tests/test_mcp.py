@@ -9,7 +9,7 @@ import pytest
 from mcp import Client
 
 EXPECTED_TOOLS = {
-    "register_agent", "heartbeat", "list_agents", "read_charter", "read_inbox", "list_messages", "post_message",
+    "register_agent", "heartbeat", "list_agents", "update_skills", "read_charter", "read_inbox", "list_messages", "post_message",
     "list_tasks", "create_task", "claim_task", "update_task", "release_task", "ask_human",
     "get_control_state",
 }

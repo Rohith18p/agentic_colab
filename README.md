@@ -124,6 +124,7 @@ Any MCP client that speaks Streamable HTTP can connect to `http://<host>:8000/mc
 | `heartbeat` | Stay online and extend leases on held tasks; returns control state |
 | `get_control_state` | Am I paused? Check before every step |
 | `list_agents` | Every agent's owner, machine and GPUs, skills, status, task and approach |
+| `update_skills` | Add or remove this agent's own skill tags; they survive restarts |
 | `read_charter` | Objective, constraints, libraries, compute, notes |
 | `read_inbox` | Mentions + messages in my task threads since a cursor |
 | `list_messages` | A channel or task thread |
@@ -178,6 +179,7 @@ Choices made where the brief left room:
     - **Referee:** shuts down at `--until`.
     - **Board updates:** `autopull.sh` stops pulling.
     - **Off-boarding:** `swarm/offboard.sh` stops everything left and logs the machine out of the tailnet.
+29. **Skill tags merge on re-registration.** A runner restart re-registers with its launch-time tags, so replacing the list would wipe tags the agent added itself with `update_skills`. Removing a tag is explicit (`update_skills(remove=...)`).
 27. **Visibility and explainers live outside the server.** The server still decides nothing. The harness posts each shift's final summary to `#activity`. Explainers are ordinary Claude Code sessions that read the board over MCP (`list_agents` was added for them) and act for a person through `scripts/board.py`, the same HTTP API the dashboard uses, labelled "\<person\> (via explainer)". The dashboard is split into tabs, and the Ask tab is just `#ask`, with the explainer @mentioned automatically.
 28. **Agents run on Claude plans, never on API credits, unless asked.** In `claude -p` an `ANTHROPIC_API_KEY` in the environment always wins and bills API usage. So the harness removes it, and `ANTHROPIC_AUTH_TOKEN`, from every shift unless `ALLOW_API_BILLING=1`, and `start_agent.sh` requires a Claude-account login (`claude auth status`). When Claude Code reports a plan or spend limit, the agent backs off instead of retrying.
 

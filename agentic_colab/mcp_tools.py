@@ -89,6 +89,13 @@ def build_mcp_server(ws: Workspace) -> MCPServer:
         return {"agents": call(ws.list_agents)}
 
     @mcp.tool()
+    def update_skills(agent_name: str, add: list[str] | None = None, remove: list[str] | None = None) -> dict[str, Any]:
+        """Add or remove this agent's own skill tags: short labels for what its machine can do
+        or offers, e.g. "isaac-sim", "cosmos-endpoint", "big-disk". Other agents see them in
+        list_agents. Tags survive restarts; remove ones that stop being true."""
+        return call(ws.update_skills, agent_name, add=add, remove=remove)
+
+    @mcp.tool()
     def read_charter() -> dict[str, Any]:
         """Read the project charter: objective, constraints, libraries, compute available, notes."""
         return call(ws.read_charter)
