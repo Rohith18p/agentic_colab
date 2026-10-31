@@ -38,12 +38,25 @@ if ! curl -fsS --max-time 5 "$BOARD/api/state" >/dev/null; then
   exit 1
 fi
 if ! command -v claude >/dev/null; then
-  echo "Claude Code is not installed on this machine. Install it, then authenticate it"
-  echo "(ANTHROPIC_API_KEY in the environment, or log in once with 'claude')."
+  echo "Claude Code is not installed on this machine. Install it, then log in once by running 'claude'."
   exit 1
 fi
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "note: ANTHROPIC_API_KEY is not set; using Claude Code's own login."
+# Shifts run on your `claude` login, so they use your plan's included usage. The harness removes
+# ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from every shift unless ALLOW_API_BILLING=1, because in
+# `claude -p` a key in the environment always wins and bills API credits instead.
+if [ "${ALLOW_API_BILLING:-0}" != "1" ]; then
+  auth=$(env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude auth status --json 2>/dev/null || echo '{}')
+  read -r logged method plan <<<"$(python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read() or "{}")
+print(d.get("loggedIn", False), d.get("authMethod", "?"), d.get("subscriptionType") or "?")' <<<"$auth")"
+  if [ "$logged" != "True" ] || [ "$method" != "claude.ai" ]; then
+    echo "Not starting: Claude Code isn't logged in with a Claude account on this machine (auth: $method)."
+    echo "Run 'claude', log in with your Pro/Max/Team/Enterprise account, then try again."
+    exit 1
+  fi
+  echo "Billing: Claude account login, $plan plan (included usage; no API credits)."
+  [ -n "${ANTHROPIC_API_KEY:-}${ANTHROPIC_AUTH_TOKEN:-}" ] && echo "note: ANTHROPIC_API_KEY/AUTH_TOKEN are set in this shell; shifts won't use them."
 fi
 
 if [ ! -x .venv/bin/python ] || ! env -u PYTHONPATH .venv/bin/python -c "import mcp" 2>/dev/null; then

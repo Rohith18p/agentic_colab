@@ -12,6 +12,14 @@ let replyTo = null;
 let editingCharter = false;
 let serverOffsetMs = 0;        // server clock minus browser clock
 let bootId = null;             // server process id; a new one means the server restarted
+const TABS = ["overview", "ask", "activity", "tasks", "messages", "charter"];
+let tab = "overview";
+// Channel feeds shown outside the Messages tab, loaded on first view and kept live.
+const FEEDS = { ask: "ask-list", activity: "activity-list", findings: "findings-list" };
+const feeds = { ask: null, activity: null, findings: null };
+let askReplyTo = null;
+// Channels that have their own tab and so stay out of the Messages tab's thread list.
+const OWN_TAB_CHANNELS = ["ask", "activity"];
 
 // ---------------------------------------------------------------- helpers
 
@@ -74,6 +82,9 @@ function inThread(m) {
 
 function renderAll() {
   if (!state) return;
+  $("#nh-badge").textContent = state.needs_human.length || "";
+  renderAskStatus();
+  renderActivityFilter();
   renderNeedsHuman();
   renderAgents();
   renderBoard();
@@ -140,7 +151,7 @@ function renderBoard() {
 }
 
 function renderThreads() {
-  const channels = state.settings.channels || ["general", "decisions"];
+  const channels = (state.settings.channels || ["general", "decisions"]).filter((c) => !OWN_TAB_CHANNELS.includes(c));
   const items = channels.map((channel) => ({ channel }))
     .concat([...state.tasks].reverse().map((t) => ({ task_id: t.id })));
   const current = threadKey(thread);
@@ -184,17 +195,90 @@ function renderMessages() {
     list.innerHTML = '<p class="muted">No messages yet.</p>';
     return;
   }
-  list.innerHTML = messages.map((m) => `
+  list.innerHTML = messages.map((m) => messageHtml(m, "data-reply")).join("");
+  if (atBottom) list.scrollTop = list.scrollHeight;
+}
+
+// replyAttr: the data attribute the reply button sets ("data-reply" for threads, "data-ask-reply" in Ask).
+function messageHtml(m, replyAttr) {
+  const where = m.task_id ? ` · <button class="link" data-open-task="${m.task_id}">${esc(taskTitle(m.task_id))}</button>` : "";
+  return `
     <div class="msg ${m.author_type}" id="msg-${m.id}">
       <div class="meta"><b>${esc(m.author_name)}</b> (${m.author_type})
         <span class="tag ${m.type}">${m.type}</span>
         ${m.reply_to ? `<span class="tag">reply to #${m.reply_to}</span>` : ""}
         ${m.needs_human && !m.resolved_at ? '<span class="tag question">needs human</span>' : ""}
-        · ${time(m.created_at)} · #${m.id}
-        <button class="link" data-reply="${m.id}" data-reply-author="${esc(m.author_name)}">reply</button></div>
+        · ${time(m.created_at)} · #${m.id}${where}
+        ${replyAttr ? `<button class="link" ${replyAttr}="${m.id}" data-reply-author="${esc(m.author_name)}">reply</button>` : ""}</div>
       <div class="body">${esc(m.body)}</div>
-    </div>`).join("");
-  if (atBottom) list.scrollTop = list.scrollHeight;
+    </div>`;
+}
+
+// ---------------------------------------------------------------- tabs and feeds
+
+function showTab(name) {
+  tab = TABS.includes(name) ? name : "overview";
+  document.querySelectorAll("main > section[data-tab]").forEach((el) => (el.hidden = el.dataset.tab !== tab));
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  if (location.hash !== `#${tab}`) history.replaceState(null, "", `#${tab}`);
+  if (tab === "ask") loadFeed("ask");
+  if (tab === "activity") loadFeed("activity");
+  if (tab === "overview") loadFeed("findings");
+}
+
+async function loadFeed(channel) {
+  feeds[channel] = await (await fetch(`/api/messages?channel=${channel}&limit=200`)).json();
+  renderFeed(channel);
+}
+
+function renderFeed(channel) {
+  const list = feeds[channel];
+  const el = $(`#${FEEDS[channel]}`);
+  if (!list || !el) return;
+  if (channel === "ask") {
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = list.length ? list.map((m) => messageHtml(m, "data-ask-reply")).join("")
+      : '<p class="muted">Nothing asked yet.</p>';
+    if (atBottom || list.length < 3) el.scrollTop = el.scrollHeight;
+  } else if (channel === "activity") {
+    const who = $("#activity-agent").value;
+    const shown = list.filter((m) => !who || m.author_name === who).slice().reverse();
+    el.innerHTML = shown.length ? shown.map((m) => messageHtml(m, null)).join("")
+      : '<p class="muted">No shift reports yet. Each agent posts one when a shift ends.</p>';
+  } else {
+    const shown = list.filter((m) => ["finding", "review"].includes(m.type)).slice(-8).reverse();
+    el.innerHTML = shown.length ? shown.map((m) => messageHtml(m, null)).join("")
+      : '<p class="muted">No findings yet.</p>';
+  }
+}
+
+function explainers() {
+  return (state ? state.agents : []).filter((a) => (a.skills || []).includes("explainer"));
+}
+
+function renderAskStatus() {
+  const online = explainers().filter((a) => a.status !== "offline");
+  const el = $("#ask-offline");
+  el.hidden = online.length > 0;
+  el.innerHTML = "No explainer is online. Start one with <code>swarm/start_explainer.sh &lt;board-url&gt;</code>, "
+    + "or chat in a terminal with <code>swarm/explain.sh &lt;board-url&gt; \"&lt;your name&gt;\"</code>.";
+}
+
+function renderActivityFilter() {
+  const sel = $("#activity-agent");
+  const names = state.agents.map((a) => a.name);
+  const have = [...sel.options].map((o) => o.value).filter(Boolean);
+  if (names.join() === have.join()) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All agents</option>' + names.map((n) => `<option>${esc(n)}</option>`).join("");
+  sel.value = names.includes(current) ? current : "";
+}
+
+function setAskReply(id, author) {
+  askReplyTo = id;
+  const el = $("#ask-reply");
+  el.hidden = !id;
+  el.innerHTML = id ? `Replying to #${id} (${esc(author)}) <button class="link" id="cancel-ask-reply">cancel</button>` : "";
 }
 
 function renderCharter() {
@@ -262,6 +346,11 @@ function connectStream() {
       messages.push(ev.payload);
       renderMessages();
     }
+    const ch = ev.type === "message.posted" && !ev.payload.task_id ? ev.payload.channel : null;
+    if (ch && feeds[ch] && !feeds[ch].some((m) => m.id === ev.payload.id)) {
+      feeds[ch].push(ev.payload);
+      renderFeed(ch);
+    }
     scheduleRefresh();
   });
 }
@@ -269,14 +358,17 @@ function connectStream() {
 // ---------------------------------------------------------------- events
 
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("[data-open-task],[data-channel],[data-pause],[data-resume],[data-reply],[data-release],[data-set-status],[data-resolve],#cancel-reply");
+  const el = e.target.closest("#tabs [data-tab],[data-open-task],[data-channel],[data-pause],[data-resume],[data-reply],[data-ask-reply],[data-release],[data-set-status],[data-resolve],#cancel-reply,#cancel-ask-reply");
   if (!el) return;
   const d = el.dataset;
   if (el.id === "cancel-reply") return setReply(null);
+  if (el.id === "cancel-ask-reply") return setAskReply(null);
+  if (d.tab) return showTab(d.tab);
+  if (d.askReply) { setAskReply(Number(d.askReply), d.replyAuthor); $("#ask-form textarea").focus(); return; }
   if (d.openTask) {
+    showTab("messages");
     openThread({ task_id: Number(d.openTask) });
-    $("#messages").scrollIntoView({ behavior: "smooth" });
-  } else if (d.channel) openThread({ channel: d.channel });
+  } else if (d.channel) { showTab("messages"); openThread({ channel: d.channel }); }
   else if (d.pause) {
     const reason = prompt(`Pause ${d.pause}? Optional reason:`, "");
     if (reason !== null) await api("POST", `/api/agents/${encodeURIComponent(d.pause)}/pause`, { reason });
@@ -314,6 +406,28 @@ $("#message-form").addEventListener("submit", async (e) => {
 $("#message-form textarea").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#message-form").requestSubmit();
 });
+
+$("#ask-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  let body = f.elements.body.value.trim();
+  const names = explainers().map((a) => a.name);
+  const target = names[0] || "explainer";
+  if (!(names.length ? names : [target]).some((n) => body.toLowerCase().includes(`@${n.toLowerCase()}`))) {
+    body = `@${target} ${body}`;
+  }
+  await api("POST", "/api/messages", { body, type: "question", channel: "ask", reply_to: askReplyTo });
+  f.elements.body.value = "";
+  setAskReply(null);
+});
+
+$("#ask-form textarea").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#ask-form").requestSubmit();
+});
+
+$("#activity-agent").addEventListener("change", () => renderFeed("activity"));
+
+window.addEventListener("hashchange", () => showTab(location.hash.slice(1)));
 
 $("#task-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -390,6 +504,7 @@ $("#name-form").addEventListener("submit", () => {
   const name = getCookie("display_name");
   if (name) setName(name); else $("#name-dialog").showModal();
   await refreshState();
+  showTab(location.hash.slice(1));
   await loadMessages();
   connectStream();
   setInterval(refreshState, 5000);  // keeps "x s ago" and offline status current

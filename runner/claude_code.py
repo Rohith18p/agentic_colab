@@ -34,6 +34,15 @@ Environment (all optional except what the Runner needs):
   AUTO_UPDATE          "1" to pull the repo before each shift and restart on runner/ changes
   SWARM_END            ISO time with offset (e.g. 2026-11-01T08:00:00-05:00): stop any running
                        shift, start no more, and exit the runner
+  ON_MENTION           "1": start a shift only when there are new messages for this agent
+                       (for the explainer: it costs nothing while nobody asks)
+  SHIFT_REPORTS        "0" to not post a report to #activity after each shift (default "1")
+  ALLOW_API_BILLING    "1" to let shifts use ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN. By default
+                       both are removed from each shift's environment, so Claude Code uses the
+                       `claude` login (a Pro/Max/Team/Enterprise plan's included usage) and never
+                       bills API credits. In `claude -p`, a key in the environment always wins.
+  LIMIT_BACKOFF_SECONDS  after a plan usage-limit or spend-limit error, wait this long before the
+                       next shift instead of retrying (default 1800)
 """
 
 from __future__ import annotations
@@ -41,13 +50,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import socket
 import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +72,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Claude Code reserves the MCP server name "workspace", so the board is attached as "board".
 MCP_SERVER_NAME = "board"
 DEFAULT_TOOLS = f"Bash Read Edit Write Glob Grep WebFetch WebSearch mcp__{MCP_SERVER_NAME}"
+# Credentials that make Claude Code bill API usage instead of the logged-in plan.
+API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# Claude Code's messages when a plan allowance or a usage-credit spend limit is reached
+# (https://code.claude.com/docs/en/errors). Retrying before the reset only burns attempts.
+LIMIT_RE = re.compile(
+    r"You've hit your (?:session|weekly|Opus|Sonnet|individual usage) limit"
+    r"|You've hit your (?:monthly|individual|org's monthly|channel's monthly) spend limit"
+    r"|You've hit your team's shared budget|Credit balance is too low|spend limit reached",
+    re.IGNORECASE,
+)
 
 NOTEBOOK_TEMPLATE = """\
 # Notebook for {name}
@@ -85,6 +105,14 @@ class ShiftResult:
     cost_usd: float = 0.0
     stopped: str | None = None  # "paused", "timeout" or "swarm_end" when the harness stopped it
     summary: str = ""
+    limit: str | None = None  # a usage/spend-limit message Claude Code reported, if any
+
+
+def note_limit(result: ShiftResult, text: str) -> None:
+    if result.limit is None:
+        match = LIMIT_RE.search(text)
+        if match:
+            result.limit = match.group(0)
 
 
 @dataclass
@@ -93,6 +121,7 @@ class HarnessState:
     spent_usd: float = 0.0
     shifts: int = 0
     last_stop: str | None = None
+    blocked_until: str | None = None  # ISO time; no shifts before it (after a usage limit)
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -197,6 +226,10 @@ class ClaudeCodeAgent(Agent):
         auto_update: bool = False,
         repo_root: Path | str | None = None,
         end: datetime | None = None,
+        on_mention: bool = False,
+        shift_reports: bool = True,
+        allow_api_billing: bool = False,
+        limit_backoff_seconds: float = 1800,
     ) -> None:
         self.command = command or ["claude"]
         self.model = model
@@ -214,6 +247,10 @@ class ClaudeCodeAgent(Agent):
         self.auto_update = auto_update
         self.repo_root = Path(repo_root) if repo_root else REPO_ROOT
         self.end = end
+        self.on_mention = on_mention
+        self.shift_reports = shift_reports
+        self.allow_api_billing = allow_api_billing
+        self.limit_backoff_seconds = limit_backoff_seconds
         self.done = False  # set at SWARM_END; the Runner then stops
         self.state = HarnessState()
         self._announced_stop = False
@@ -237,6 +274,10 @@ class ClaudeCodeAgent(Agent):
             extra_args=shlex.split(os.environ.get("AGENT_EXTRA_ARGS", "")),
             auto_update=os.environ.get("AUTO_UPDATE") == "1",
             end=parse_end(os.environ.get("SWARM_END")),
+            on_mention=os.environ.get("ON_MENTION") == "1",
+            shift_reports=os.environ.get("SHIFT_REPORTS", "1") != "0",
+            allow_api_billing=os.environ.get("ALLOW_API_BILLING") == "1",
+            limit_backoff_seconds=_env_float("LIMIT_BACKOFF_SECONDS", 1800),
         )
 
     # ------------------------------------------------------------------ files
@@ -322,6 +363,8 @@ class ClaudeCodeAgent(Agent):
             log.warning("%s: SWARM_END (%s) has passed; stopping for good", ctx.agent_name, self.end.isoformat())
             self.done = True
             return False
+        if self.state.blocked_until and datetime.now(timezone.utc) < datetime.fromisoformat(self.state.blocked_until):
+            return False  # waiting out a plan usage limit
         reason = self._out_of_budget()
         if reason:
             if not self._announced_stop:
@@ -335,7 +378,10 @@ class ClaudeCodeAgent(Agent):
 
         old_cursor = ctx.inbox_cursor
         inbox = await ctx.read_inbox()
+        if self.on_mention and not inbox:
+            return False  # nobody asked anything; check again after the idle interval
         number = self.state.shifts + 1
+        started = datetime.now(timezone.utc)
         prompt = self._shift_prompt(ctx, number, inbox)
         log_path = self.workdir(ctx.agent_name) / "logs" / f"shift-{number:04d}.jsonl"
         log.info("%s: starting shift %d (%d new messages)", ctx.agent_name, number, len(inbox))
@@ -348,6 +394,12 @@ class ClaudeCodeAgent(Agent):
         self.state.shifts = number
         self.state.spent_usd += result.cost_usd
         self.state.last_stop = result.stopped
+        if result.limit:
+            until = datetime.now(timezone.utc) + timedelta(seconds=self.limit_backoff_seconds)
+            self.state.blocked_until = until.isoformat(timespec="seconds")
+            log.warning("%s: %s; no shifts until %s", ctx.agent_name, result.limit, self.state.blocked_until)
+        else:
+            self.state.blocked_until = None
         self.state.history = (self.state.history + [{
             "shift": number,
             "ended_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -359,7 +411,30 @@ class ClaudeCodeAgent(Agent):
         self._save_state(ctx.agent_name)
         log.info("%s: shift %d ended (exit %s, $%.2f, stopped=%s); total $%.2f", ctx.agent_name, number,
                  result.exit_code, result.cost_usd, result.stopped, self.state.spent_usd)
+        if self.shift_reports:
+            await self._post_report(ctx, number, started, result)
         return True
+
+    async def _post_report(self, ctx: AgentContext, number: int, started: datetime, result: ShiftResult) -> None:
+        """One message per shift in #activity: the agent's own end-of-shift summary plus cost and outcome."""
+        minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
+        head = f"Shift {number} · {minutes:.0f} min · ${result.cost_usd:.2f} (total ${self.state.spent_usd:.2f})"
+        if result.limit:
+            head += f" · usage limit: \"{result.limit}\"; next shift after {self.state.blocked_until}"
+        if result.stopped:
+            head += f" · stopped: {result.stopped}"
+        elif result.exit_code not in (0, None):
+            head += f" · exit code {result.exit_code}"
+        try:
+            held = await ctx.list_tasks(claimed_by=ctx.agent_name)
+            if held:
+                head += " · holds " + ", ".join(f"#{t['id']} {t['title']}" for t in held[:3])
+            summary = result.summary.strip() or "(no summary: the shift ended before Claude wrote one)"
+            if len(summary) > 1800:
+                summary = summary[:1800] + " …[truncated]"
+            await ctx.post_message(f"{head}\n{summary}", channel="activity")
+        except (ToolCallError, WorkspaceUnreachable) as e:  # e.g. paused or after SWARM_END
+            log.info("%s: shift report not posted: %s", ctx.agent_name, e)
 
     # ------------------------------------------------------------------ shift
 
@@ -373,6 +448,12 @@ class ClaudeCodeAgent(Agent):
             lines.append(f"- [id {m['id']}] {where}, {m['author_name']} ({m['author_type']}, {m['type']}{reply}): {body}")
         messages = "\n".join(lines) if lines else "(none)"
         total = f"${self.total_budget_usd:.2f}" if self.total_budget_usd is not None else "no limit"
+        ending = (
+            "Answer the new messages above as your playbook says, then end the shift."
+            if self.on_mention else
+            "Follow the swarm playbook in your system prompt: orient, pick one meaningful unit of work,\n"
+            "do it, report it on the board, update NOTEBOOK.md, and end the shift."
+        )
         return f"""\
 You are swarm agent `{ctx.agent_name}`, starting shift {number}. Time now: {now}.
 
@@ -380,14 +461,14 @@ The board is the `{MCP_SERVER_NAME}` MCP server (tools named mcp__{MCP_SERVER_NA
 Budget: at most ${self.shift_budget_usd:.2f} this shift; ${self.state.spent_usd:.2f} spent so far of {total}.
 Your working directory persists between shifts: {self.workdir(ctx.agent_name)}
 Your notes from earlier shifts are in NOTEBOOK.md there.
+The swarm repo checkout (playbook, scripts such as scripts/board.py): {self.repo_root}
 
 New messages for you since your last shift:
 {messages}
 
 If you check read_inbox again during this shift, pass cursor={ctx.inbox_cursor}.
 
-Follow the swarm playbook in your system prompt: orient, pick one meaningful unit of work,
-do it, report it on the board, update NOTEBOOK.md, and end the shift.
+{ending}
 """
 
     def _command(self, ctx: AgentContext, prompt: str) -> list[str]:
@@ -410,6 +491,9 @@ do it, report it on the board, update NOTEBOOK.md, and end the shift.
     async def _run_shift(self, ctx: AgentContext, cmd: list[str], log_path: Path) -> ShiftResult:
         result = ShiftResult()
         env = {**os.environ, "AGENT_NAME": ctx.agent_name, "WORKSPACE_MCP_URL": ctx.client.url}
+        if not self.allow_api_billing:
+            for var in API_BILLING_VARS:  # use the `claude` login (plan usage), never API credits
+                env.pop(var, None)
         output_done = anyio.Event()
 
         async with await anyio.open_process(
@@ -480,12 +564,18 @@ do it, report it on the board, update NOTEBOOK.md, and end the shift.
     def _parse_event(line: bytes, result: ShiftResult) -> None:
         line = line.strip()
         if not line.startswith(b"{"):
+            # Plain lines are Claude Code's own stderr (errors such as a usage limit).
+            note_limit(result, line.decode(errors="replace"))
             return
         try:
             event = json.loads(line)
         except ValueError:
             return
         if event.get("type") == "result":
+            # Only an errored final result carries Claude Code's error text; agent output and a
+            # normal summary are ignored, so an agent quoting these messages can't trigger a backoff.
+            if event.get("is_error") or event.get("subtype") not in (None, "success"):
+                note_limit(result, json.dumps({k: event.get(k) for k in ("result", "errors", "error")}))
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)):
                 result.cost_usd = float(cost)

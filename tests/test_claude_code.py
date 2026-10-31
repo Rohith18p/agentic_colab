@@ -19,9 +19,14 @@ import json, os, sys, time
 args = sys.argv[1:]
 out = os.path.join(os.getcwd(), "calls.jsonl")
 with open(out, "a") as f:
-    f.write(json.dumps({"args": args, "agent": os.environ.get("AGENT_NAME")}) + "\\n")
+    f.write(json.dumps({"args": args, "agent": os.environ.get("AGENT_NAME"),
+                        "api_key": "ANTHROPIC_API_KEY" in os.environ}) + "\\n")
 print(json.dumps({"type": "system", "subtype": "init"}), flush=True)
 time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
+if os.environ.get("FAKE_LIMIT"):
+    print(json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                      "result": "You've hit your session limit · resets 3pm", "total_cost_usd": 0}), flush=True)
+    sys.exit(1)
 print(json.dumps({"type": "result", "total_cost_usd": 0.25, "result": "did one thing"}), flush=True)
 """
 
@@ -159,3 +164,50 @@ async def test_swarm_end_stops_the_shift_and_the_runner(live_server, tmp_path, m
         await runner.run()  # returns by itself once the agent is done
     assert time.monotonic() - started < 15
     assert agent.done and agent.state.last_stop == "swarm_end" and agent.state.shifts == 1
+
+
+@pytest.mark.anyio
+async def test_shifts_never_see_api_keys_and_report_to_activity(live_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-not-be-used")
+    agent = make_agent(tmp_path, max_shifts=1)
+    runner = Runner(live_server.url, "cc-plan", agent, step_interval=0.05, idle_interval=0.1, heartbeat_interval=0.3)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(runner.run)
+        await wait_until(lambda: live_server.ws.list_messages(channel="activity"), timeout=20, message="shift report")
+        runner.stop()
+    assert calls(tmp_path)[0]["api_key"] is False
+    report = live_server.ws.list_messages(channel="activity")[0]
+    assert report["author_name"] == "cc-plan" and report["body"].startswith("Shift 1") and "did one thing" in report["body"]
+
+
+@pytest.mark.anyio
+async def test_usage_limit_pauses_new_shifts(live_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_LIMIT", "1")
+    agent = make_agent(tmp_path, limit_backoff_seconds=3600)
+    runner = Runner(live_server.url, "cc-limit", agent, step_interval=0.05, idle_interval=0.1, heartbeat_interval=0.3)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(runner.run)
+        await wait_until(lambda: agent.state.shifts >= 1, timeout=20, message="first shift")
+        await anyio.sleep(1.0)  # several idle loops: none may start another shift
+        runner.stop()
+    assert agent.state.shifts == 1 and len(calls(tmp_path)) == 1
+    assert agent.state.blocked_until is not None
+    report = live_server.ws.list_messages(channel="activity")[0]["body"]
+    assert "usage limit" in report and "session limit" in report
+
+
+@pytest.mark.anyio
+async def test_on_mention_agent_only_runs_when_asked(live_server, tmp_path):
+    agent = make_agent(tmp_path, on_mention=True, shift_reports=False)
+    runner = Runner(live_server.url, "explainer", agent, step_interval=0.05, idle_interval=0.1, heartbeat_interval=0.3)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(runner.run)
+        await wait_until(lambda: runner.registered, message="registered")
+        await anyio.sleep(0.8)
+        assert calls(tmp_path) == []  # nobody asked: no shift, no usage
+        live_server.ws.post_message("Nail", "human", "question", "@explainer what is bob-1 doing?", channel="ask")
+        await wait_until(lambda: agent.state.shifts >= 1, timeout=20, message="shift after the question")
+        runner.stop()
+    prompt = calls(tmp_path)[0]["args"][calls(tmp_path)[0]["args"].index("-p") + 1]
+    assert "what is bob-1 doing?" in prompt and "Answer the new messages" in prompt
+    assert live_server.ws.list_messages(channel="activity") == []

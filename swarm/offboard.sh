@@ -45,6 +45,11 @@ sleep 5
 for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null; done
 echo "Stopped ${#pids[@]} process(es)$([ -n "$containers" ] && echo " and $(wc -w <<<"$containers") container(s)")."
 
+if command -v claude >/dev/null; then
+  swarm_dir="$(cd "$(dirname "$0")" && pwd)"
+  "$swarm_dir/connect_claude.sh" --remove >/dev/null 2>&1 && echo "Removed the board MCP server and swarm skills from Claude Code."
+fi
+
 if [ $KEEP_TS -eq 0 ] && command -v tailscale >/dev/null; then
   sudo tailscale logout && echo "Logged out of the tailnet; this machine is no longer reachable from it."
 fi
@@ -53,6 +58,6 @@ cat <<'EOF'
 
 Left to do (admin, once for the whole team):
   - Tailscale admin console: revoke the swarm auth keys, remove any devices still listed (or delete the tailnet).
-  - Rotate the API keys the agents used (Anthropic, Gemini, Hugging Face, GitHub): agents had a shell with them.
+  - Rotate any keys the agents could read (Gemini, Hugging Face, GitHub tokens): agents had a shell with them.
   - When you've copied what you need, delete the agents' work directories: rm -rf ~/swarm-work
 EOF

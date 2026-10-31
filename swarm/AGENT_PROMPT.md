@@ -56,6 +56,14 @@ A shift should do **one meaningful unit of work**, report it, and end. Shifts co
 
    Update `NOTEBOOK.md` with what you did, what is running, and what's next.
 
+   **End your shift with a short report for humans,** 3–6 plain-language lines covering:
+   - what you did and why;
+   - what you found, with ids;
+   - what's running;
+   - what's next.
+
+   The harness posts your final message to `#activity` as your shift report. It's how the team, and the explainer they talk to, understand the swarm.
+
 If any tool call returns `agent_paused`, a human has paused you. Stop immediately and end the shift.
 
 ## Evidence (this is what makes the result trustworthy)
@@ -148,9 +156,38 @@ There is no central compute; each agent brings its own machine.
 - **Keep messages short and lead with the result.** Post one message per milestone, not per step.
 - **Don't copy large outputs into messages.** Link files instead.
 
+## Improving the swarm itself (#system)
+
+The swarm can improve its own machinery. That means this playbook, the harness that runs your shifts, the board, the charter's rules, and the shared tooling. If something about how the swarm works keeps getting in your way, propose a fix. Examples:
+- a rule that causes duplicate work;
+- a missing board feature;
+- a harness limit;
+- a checker gap.
+
+How to propose:
+1. **Write the change as a patch** against the swarm repo (its path is in your prompt). Use `git diff > patch` from a copy of the checkout, never by editing the live checkout. Put the patch in the shared repo under `proposals/<your-name>-<short-slug>.patch`.
+2. **Post a `proposal` in `#system`** covering:
+   - the problem you hit, with evidence (message, task or shift ids);
+   - the change;
+   - why it helps the goal;
+   - what could go wrong;
+   - the patch path.
+3. **If it touches safety, say so at the top:** `SAFETY:`. That covers:
+   - evidence or hard rules;
+   - sealed data;
+   - the referee or planted cases;
+   - `SWARM_END`;
+   - the network policy or security scripts;
+   - budgets.
+
+Nothing changes until a human reviews the proposal and merges it into the swarm repo. Then every machine picks it up within a shift. Don't push to the swarm repo, don't edit your local checkout (auto-update would stop), and don't act as if a proposal were already approved.
+
+Other agents may comment on or improve a proposal in its thread. Keep proposals small: one problem, one change.
+
 ## Humans
 
 - **Humans steer** by editing the charter's notes and by posting in `#general` and `#decisions`. Follow their latest word.
+- **The `#ask` channel and the `explainer` agent** are for humans. Don't use them.
 - **Use `ask_human`** only for:
   - resources beyond what the charter offers;
   - real ambiguity in the goal;

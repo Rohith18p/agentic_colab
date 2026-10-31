@@ -14,6 +14,14 @@
   <span class="spacer"></span>
   <span>You are <b id="me">?</b> <button id="change-name" class="link">change</button></span>
 </header>
+<nav id="tabs" class="tabs">
+  <button data-tab="overview">Overview <span id="nh-badge" class="count" title="Questions waiting for a human"></span></button>
+  <button data-tab="ask">Ask</button>
+  <button data-tab="activity">Activity</button>
+  <button data-tab="tasks">Tasks</button>
+  <button data-tab="messages">Messages</button>
+  <button data-tab="charter">Charter</button>
+</nav>
 
 <dialog id="name-dialog">
   <form method="dialog" id="name-form">
@@ -25,12 +33,12 @@
 </dialog>
 
 <main>
-  <section id="needs-human" class="panel">
+  <section id="needs-human" class="panel" data-tab="overview">
     <h2>Needs human <span id="nh-count" class="count"></span></h2>
     <div id="nh-list"><p class="muted">No open questions.</p></div>
   </section>
 
-  <section id="agents" class="panel">
+  <section id="agents" class="panel" data-tab="overview">
     <h2>Agents</h2>
     <table>
       <thead><tr><th>Name</th><th>Owner / machine</th><th>Status</th><th>Task</th><th>Approach</th><th>Last heartbeat</th><th></th></tr></thead>
@@ -38,7 +46,36 @@
     </table>
   </section>
 
-  <section id="tasks" class="panel">
+  <section id="recent-findings" class="panel" data-tab="overview">
+    <h2>Recent findings and reviews <button class="link" data-channel="findings">open #findings</button></h2>
+    <div id="findings-list" class="feed"><p class="muted">No findings yet.</p></div>
+  </section>
+
+  <section id="ask" class="panel" data-tab="ask">
+    <h2>Ask the explainer</h2>
+    <p class="muted">Ask what the agents are doing and why, or say how you'd like to steer. The explainer drafts the
+      change (a steering line, a message to an agent, a task, a pause), applies it only after you reply yes, and
+      posts it as "&lt;you&gt; (via explainer)".</p>
+    <p id="ask-offline" class="warning" hidden></p>
+    <div id="ask-list" class="message-list tall"></div>
+    <form id="ask-form" class="stack">
+      <div id="ask-reply" class="muted" hidden></div>
+      <textarea name="body" rows="2" placeholder="e.g. Why did bob-1 drop the pendulum work?  (Ctrl+Enter to send)" required></textarea>
+      <button type="submit">Ask</button>
+    </form>
+  </section>
+
+  <section id="activity" class="panel" data-tab="activity">
+    <h2>Activity</h2>
+    <div class="row">
+      <span class="muted">One report per agent shift: the agent's own summary, cost and outcome. Newest first.</span>
+      <span class="spacer"></span>
+      <select id="activity-agent"><option value="">All agents</option></select>
+    </div>
+    <div id="activity-list" class="feed"></div>
+  </section>
+
+  <section id="tasks" class="panel" data-tab="tasks">
     <h2>Task board</h2>
     <details>
       <summary>New task</summary>
@@ -52,7 +89,7 @@
     <div id="board" class="board"></div>
   </section>
 
-  <section id="messages" class="panel">
+  <section id="messages" class="panel" data-tab="messages">
     <h2>Message board</h2>
     <div class="msg-layout">
       <nav id="threads"></nav>
@@ -80,7 +117,7 @@
     </div>
   </section>
 
-  <section id="charter" class="panel">
+  <section id="charter" class="panel" data-tab="charter">
     <h2>Charter <span id="charter-version" class="muted"></span></h2>
     <p class="warning">⚠ {{ charter_warning }}</p>
     <div id="charter-view"></div>
