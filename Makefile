@@ -21,7 +21,7 @@ $(VENV)/.installed: pyproject.toml requirements.lock
 install: $(VENV)/.installed
 
 run: install
-	$(PY) -m uvicorn agentic_colab.main:create_app --factory --host $(HOST) --port $(PORT)
+	$(PY) -m agentic_colab --host $(HOST) --port $(PORT)
 
 test: install
 	$(PY) -m pytest
@@ -30,8 +30,10 @@ demo: install
 	PORT=$(PORT) $(PY) scripts/demo.py
 
 # Regenerate the pinned lock file (all transitive deps) from pyproject.toml.
+# e.g. make lock EXCLUDE_NEWER=2026-10-17 to skip releases newer than that date.
 lock:
-	uv pip compile pyproject.toml --extra dev --python-version 3.12 -o requirements.lock
+	uv pip compile pyproject.toml --extra dev --python-version 3.12 \
+		$(if $(EXCLUDE_NEWER),--exclude-newer $(EXCLUDE_NEWER)) -o requirements.lock
 
 clean:
 	rm -rf $(VENV) data/*.db data/*.db-wal data/*.db-shm .pytest_cache

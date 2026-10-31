@@ -1,0 +1,15 @@
+services:
+  workspace:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - workspace-data:/data
+    environment:
+      LEASE_SECONDS: "90"
+      # Set to e.g. "myhost.tailnet-name.ts.net:*" to turn on MCP Host-header checks.
+      MCP_ALLOWED_HOSTS: ""
+    restart: unless-stopped
+
+volumes:
+  workspace-data:

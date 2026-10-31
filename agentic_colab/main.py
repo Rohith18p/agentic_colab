@@ -159,13 +159,13 @@ def build_api(ws: Workspace) -> APIRouter:
             _, wake = entry
             try:
                 yield "retry: 2000\n\n"
-                while not await request.is_disconnected():
+                while not ws.notifier.closed and not await request.is_disconnected():
                     wake.clear()
                     rows = await run(ws.list_events, after_id=cursor, limit=200)
                     for row in rows:
                         cursor = row["id"]
                         yield f"id: {row['id']}\nevent: workspace\ndata: {json.dumps(row)}\n\n"
-                    if rows:
+                    if rows or ws.notifier.closed:
                         continue
                     try:
                         await asyncio.wait_for(wake.wait(), timeout=15)

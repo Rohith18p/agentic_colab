@@ -665,6 +665,7 @@ class Workspace:
     def _clear_current_task(self, s: Session, task_id: int) -> None:
         for agent in s.scalars(select(Agent).where(Agent.current_task_id == task_id)):
             agent.current_task_id = None
+            agent.approach = ""
             if agent.status in ("working", "waiting_on_human", "blocked"):
                 agent.status = "idle"
 

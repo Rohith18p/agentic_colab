@@ -73,8 +73,7 @@ def main() -> None:
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{DB}", "LEASE_SECONDS": "30"}
     procs: list[subprocess.Popen] = []
     server = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "agentic_colab.main:create_app", "--factory",
-         "--host", "127.0.0.1", "--port", str(PORT), "--log-level", "warning"],
+        [sys.executable, "-m", "agentic_colab", "--host", "127.0.0.1", "--port", str(PORT), "--log-level", "warning"],
         cwd=ROOT, env=env,
     )
     procs.append(server)

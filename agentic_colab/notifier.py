@@ -15,6 +15,8 @@ class Notifier:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._waiters: set[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
+        # Set when the server is shutting down; streams end so shutdown isn't blocked.
+        self.closed = False
 
     def subscribe(self) -> tuple[asyncio.AbstractEventLoop, asyncio.Event]:
         entry = (asyncio.get_running_loop(), asyncio.Event())
@@ -34,3 +36,7 @@ class Notifier:
                 loop.call_soon_threadsafe(ev.set)
             except RuntimeError:  # loop closed
                 self.unsubscribe((loop, ev))
+
+    def close(self) -> None:
+        self.closed = True
+        self.notify()
