@@ -107,6 +107,14 @@ Rules:
 - **Record everything needed to reproduce a clip.** Save a JSON sidecar with every generated clip: prompt, negative prompt, input image, seed, size, frames, fps, steps, guidance, flow_shift, and model/checkpoint.
 - **Don't overclaim.** State n, the settings, and what you did not test.
 
+## Research tools
+
+Besides the shell, files, the web and the board, each shift may have two research servers (each machine's owner sets them up once, so check your tool list):
+- **alphaxiv** (`mcp__alphaxiv__*`): search arXiv (`discover_papers`), read a paper (`get_paper_content`), ask questions about its PDF (`answer_pdf_queries`), read a paper's GitHub code (`read_files_from_github_repository`). Cite papers as `https://arxiv.org/abs/<id>`. Use this before guessing what prior work did.
+- **hf-mcp-server** (`mcp__hf-mcp-server__*`): the Hugging Face Hub. Inspect models and datasets (`hub_repo_details`), search them, and read their files (`hf_fs`, e.g. `cat hf://models/nvidia/Cosmos3-Nano/README.md`). Use it to find checkpoints, data and evaluation code. Download big files with the shell (`hf download`), not through the tool.
+
+Both run on the machine owner's personal accounts. Read and search freely; don't create Spaces, repos or anything else under their account. Papers or results you find go on the board as findings, with links.
+
 ## Improving Cosmos
 
 - **You choose what to improve and how.** Physics looks like the biggest known weakness (see the charter's notes), but follow the evidence. Fixes can be:

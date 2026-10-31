@@ -36,6 +36,7 @@ def make_agent(tmp_path, **kw) -> ClaudeCodeAgent:
     fake.write_text(FAKE_CLAUDE)
     playbook = tmp_path / "PLAYBOOK.md"
     playbook.write_text("Be a good swarm agent.")
+    kw.setdefault("claude_config", tmp_path / "no-claude-config.json")  # never the real ~/.claude.json
     return ClaudeCodeAgent(
         command=[sys.executable, str(fake)], prompt_file=playbook, workdir=tmp_path / "work",
         pause_poll_seconds=0.2, **kw,
@@ -211,3 +212,42 @@ async def test_on_mention_agent_only_runs_when_asked(live_server, tmp_path):
     prompt = calls(tmp_path)[0]["args"][calls(tmp_path)[0]["args"].index("-p") + 1]
     assert "what is bob-1 doing?" in prompt and "Answer the new messages" in prompt
     assert live_server.ws.list_messages(channel="activity") == []
+
+
+@pytest.mark.anyio
+async def test_shifts_get_the_research_mcp_servers_from_the_claude_config(live_server, tmp_path):
+    config = tmp_path / "claude.json"
+    config.write_text(json.dumps({"mcpServers": {
+        "alphaxiv": {"type": "http", "url": "https://api.alphaxiv.org/mcp/v1"},
+        "hf-mcp-server": {"type": "http", "url": "https://huggingface.co/mcp?login"},
+        "playwright": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp"]},
+        "board": {"type": "http", "url": "http://elsewhere/mcp"},
+    }}))
+    agent = make_agent(tmp_path, max_shifts=1, claude_config=config,
+                       extra_mcp_servers=["alphaxiv", "hf-mcp-server", "board", "not-installed"])
+    runner = Runner(live_server.url, "cc-mcp", agent, step_interval=0.05, idle_interval=0.1, heartbeat_interval=0.3)
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(runner.run)
+        await wait_until(lambda: agent.state.shifts >= 1, timeout=20, message="one shift")
+        runner.stop()
+
+    path = tmp_path / "work" / ".mcp-workspace.json"
+    servers = json.loads(path.read_text())["mcpServers"]
+    assert set(servers) == {"board", "alphaxiv", "hf-mcp-server"}  # only what was asked for and exists
+    assert servers["board"]["url"].startswith(live_server.url)  # the swarm's board is never replaced
+    assert servers["hf-mcp-server"]["url"] == "https://huggingface.co/mcp?login"
+    assert path.stat().st_mode & 0o077 == 0
+    args = calls(tmp_path)[0]["args"]
+    allowed = args[args.index("--allowedTools") + 1].split()
+    assert {"mcp__board", "mcp__alphaxiv", "mcp__hf-mcp-server", "Bash"} <= set(allowed)
+    assert "mcp__alphaxiv__delete_folder" in args[args.index("--disallowedTools") + 1].split()
+
+
+def test_extra_mcp_servers_default_and_hot_setting(tmp_path, monkeypatch):
+    monkeypatch.delenv("EXTRA_MCP_SERVERS", raising=False)
+    assert ClaudeCodeAgent().extra_mcp_servers == ["alphaxiv", "hf-mcp-server"]
+    monkeypatch.setenv("EXTRA_MCP_SERVERS", "")
+    assert ClaudeCodeAgent.from_env().extra_mcp_servers == []
+    from runner.claude_code import HOT_SETTINGS
+    attr, parse = HOT_SETTINGS["EXTRA_MCP_SERVERS"]
+    assert attr == "extra_mcp_servers" and parse(" alphaxiv , wandb ") == ["alphaxiv", "wandb"]

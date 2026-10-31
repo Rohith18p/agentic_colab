@@ -58,6 +58,16 @@ print(d.get("loggedIn", False), d.get("authMethod", "?"), d.get("subscriptionTyp
   echo "Billing: Claude account login, $plan plan (included usage; no API credits)."
   [ -n "${ANTHROPIC_API_KEY:-}${ANTHROPIC_AUTH_TOKEN:-}" ] && echo "note: ANTHROPIC_API_KEY/AUTH_TOKEN are set in this shell; shifts won't use them."
 fi
+# Research MCP servers every shift gets (copied from your Claude Code config; see swarm/README.md).
+# Informational only: a missing one just means agents on this machine run without it.
+for server in $(echo "${EXTRA_MCP_SERVERS-alphaxiv,hf-mcp-server}" | tr ',' ' '); do
+  status=$(claude mcp get "$server" 2>/dev/null | sed -n 's/^ *Status: *//p' || true)
+  case "$status" in
+    *onnected*) echo "Research tool $server: connected" ;;
+    "") echo "Research tool $server: not set up, so agents here run without it (to add it: swarm/README.md, \"Research tools\")" ;;
+    *) echo "Research tool $server: $status. Run 'claude', type /mcp and log in to $server." ;;
+  esac
+done
 
 if [ ! -x .venv/bin/python ] || ! env -u PYTHONPATH .venv/bin/python -c "import mcp" 2>/dev/null; then
   echo "Creating .venv with the runner dependency (mcp==2.3.0)..."

@@ -29,7 +29,12 @@ Environment (all optional except what the Runner needs):
   MAX_SHIFTS           stop after this many shifts (default: no limit)
   SHIFT_TIMEOUT_SECONDS  stop a shift that runs longer than this (default 2700)
   PERMISSION_MODE      Claude Code --permission-mode (default "default")
-  ALLOWED_TOOLS        Claude Code --allowedTools (default: shell, files, web, workspace)
+  ALLOWED_TOOLS        Claude Code --allowedTools (default: shell, files, web, board); every attached
+                       MCP server's tools are added to it
+  EXTRA_MCP_SERVERS    comma-separated MCP servers from this machine's Claude Code config that every
+                       shift also gets (default "alphaxiv,hf-mcp-server": papers and the Hugging Face
+                       Hub). Their definitions are copied, so shifts reuse the OAuth login done once
+                       in an interactive session (`claude`, then /mcp). Missing ones are skipped.
   AGENT_EXTRA_ARGS     extra Claude Code arguments, shell-quoted
   AUTO_UPDATE          "1" to pull the repo before each shift and restart on runner/ changes
   SWARM_END            ISO time with offset (e.g. 2026-11-01T08:00:00-05:00): stop any running
@@ -72,6 +77,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Claude Code reserves the MCP server name "workspace", so the board is attached as "board".
 MCP_SERVER_NAME = "board"
 DEFAULT_TOOLS = f"Bash Read Edit Write Glob Grep WebFetch WebSearch mcp__{MCP_SERVER_NAME}"
+DEFAULT_EXTRA_MCP = "alphaxiv,hf-mcp-server"
+# How a teammate adds each default research server once (then logs in with /mcp in `claude`).
+EXTRA_MCP_SETUP = {
+    "alphaxiv": "claude mcp add --scope user --transport http alphaxiv https://api.alphaxiv.org/mcp/v1",
+    "hf-mcp-server": "claude mcp add --scope user --transport http hf-mcp-server 'https://huggingface.co/mcp?login'",
+}
+# alphaxiv tools that change the owner's personal library or follows; shifts never call them.
+DISALLOWED_TOOLS = " ".join(f"mcp__alphaxiv__{tool}" for tool in (
+    "create_folder", "delete_folder", "rename_folder", "save_papers_to_folder", "remove_papers_from_folder",
+    "move_papers_between_folders", "edit_private_paper_metadata", "follow_researcher", "unfollow_researcher",
+))
 # Credentials that make Claude Code bill API usage instead of the logged-in plan.
 API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 # Claude Code's messages when a plan allowance or a usage-credit spend limit is reached
@@ -130,6 +146,10 @@ def _env_float(name: str, default: float | None) -> float | None:
     return float(value) if value else default
 
 
+def _names(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def _optional(parse):
     return lambda value: parse(value) if value else None
 
@@ -155,7 +175,22 @@ HOT_SETTINGS = {
     "ALLOWED_TOOLS": ("allowed_tools", str),
     "AGENT_EXTRA_ARGS": ("extra_args", shlex.split),
     "SWARM_END": ("end", parse_end),
+    "EXTRA_MCP_SERVERS": ("extra_mcp_servers", _names),
 }
+
+
+def claude_config_file() -> Path:
+    """Where Claude Code keeps user-scope MCP servers (`claude mcp add --scope user`)."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(base).expanduser() / ".claude.json" if base else Path.home() / ".claude.json"
+
+
+def user_mcp_servers(path: Path) -> dict[str, dict]:
+    try:
+        servers = json.loads(path.read_text()).get("mcpServers") or {}
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return servers if isinstance(servers, dict) else {}
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -230,6 +265,8 @@ class ClaudeCodeAgent(Agent):
         shift_reports: bool = True,
         allow_api_billing: bool = False,
         limit_backoff_seconds: float = 1800,
+        extra_mcp_servers: list[str] | None = None,
+        claude_config: Path | str | None = None,
     ) -> None:
         self.command = command or ["claude"]
         self.model = model
@@ -251,6 +288,10 @@ class ClaudeCodeAgent(Agent):
         self.shift_reports = shift_reports
         self.allow_api_billing = allow_api_billing
         self.limit_backoff_seconds = limit_backoff_seconds
+        self.extra_mcp_servers = _names(DEFAULT_EXTRA_MCP) if extra_mcp_servers is None else list(extra_mcp_servers)
+        self.claude_config = Path(claude_config) if claude_config else claude_config_file()
+        self.mcp_servers: list[str] = [MCP_SERVER_NAME]  # attached to the latest shift
+        self._missing_mcp_warned: set[str] = set()
         self.done = False  # set at SWARM_END; the Runner then stops
         self.state = HarnessState()
         self._announced_stop = False
@@ -278,6 +319,7 @@ class ClaudeCodeAgent(Agent):
             shift_reports=os.environ.get("SHIFT_REPORTS", "1") != "0",
             allow_api_billing=os.environ.get("ALLOW_API_BILLING") == "1",
             limit_backoff_seconds=_env_float("LIMIT_BACKOFF_SECONDS", 1800),
+            extra_mcp_servers=_names(os.environ.get("EXTRA_MCP_SERVERS", DEFAULT_EXTRA_MCP)),
         )
 
     # ------------------------------------------------------------------ files
@@ -298,9 +340,26 @@ class ClaudeCodeAgent(Agent):
         self._state_path(agent_name).write_text(json.dumps(self.state.__dict__, indent=2))
 
     def _write_mcp_config(self, ctx: AgentContext) -> Path:
+        """The board plus the research servers, copied from this machine's Claude Code config."""
+        servers: dict[str, Any] = {MCP_SERVER_NAME: {"type": "http", "url": ctx.client.url}}
+        configured = user_mcp_servers(self.claude_config) if self.extra_mcp_servers else {}
+        for name in self.extra_mcp_servers:
+            if name in configured and name != MCP_SERVER_NAME:
+                servers[name] = configured[name]
+            elif name not in self._missing_mcp_warned:
+                self._missing_mcp_warned.add(name)
+                setup = EXTRA_MCP_SETUP.get(name, f"claude mcp add --scope user {name} ...")
+                log.warning("MCP server %r is not in %s, so shifts run without it. Add it once with: %s "
+                            "(then run `claude` and log in under /mcp)", name, self.claude_config, setup)
+        self.mcp_servers = list(servers)
         path = self.workdir(ctx.agent_name) / ".mcp-workspace.json"
-        path.write_text(json.dumps({"mcpServers": {MCP_SERVER_NAME: {"type": "http", "url": ctx.client.url}}}, indent=2))
+        path.write_text(json.dumps({"mcpServers": servers}, indent=2))
+        path.chmod(0o600)  # copied definitions can carry tokens in headers
         return path
+
+    def _allowed_tools(self) -> str:
+        tools = self.allowed_tools.split()
+        return " ".join(tools + [f"mcp__{name}" for name in self.mcp_servers if f"mcp__{name}" not in tools])
 
     # ------------------------------------------------------------------ agent hooks
 
@@ -473,18 +532,20 @@ If you check read_inbox again during this shift, pass cursor={ctx.inbox_cursor}.
 
     def _command(self, ctx: AgentContext, prompt: str) -> list[str]:
         playbook = self.prompt_file.read_text()
+        mcp_config = self._write_mcp_config(ctx)
         return [
             *self.command,
             "-p", prompt,
             "--append-system-prompt", playbook,
-            "--mcp-config", str(self._write_mcp_config(ctx)),
+            "--mcp-config", str(mcp_config),
             "--strict-mcp-config",
             "--output-format", "stream-json",
             "--verbose",
             "--model", self.model,
             "--max-budget-usd", f"{self.shift_budget_usd:.2f}",
             "--permission-mode", self.permission_mode,
-            "--allowedTools", self.allowed_tools,
+            "--allowedTools", self._allowed_tools(),
+            "--disallowedTools", DISALLOWED_TOOLS,
             *self.extra_args,
         ]
 
