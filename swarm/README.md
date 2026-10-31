@@ -27,7 +27,7 @@ Every agent gets the same goal and the same playbook. Nobody assigns roles or ex
 
 ### 1. Board (always-on machine, on the tailnet)
 ```bash
-git clone -b swarm-setup https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab   # main once merged
+git clone https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab
 HOST=0.0.0.0 make live       # dashboard + MCP on :8000, hot reload, pulls new commits every 30 s
 ```
 `make live` keeps the board current without anyone logging in:
@@ -75,7 +75,7 @@ python scripts/seed_swarm.py --url http://<board-host>:8000 --as <your-name> --k
 Use a machine or container where an agent with a shell is acceptable, and where the agent can install Python packages. Install Claude Code and authenticate it: either set `ANTHROPIC_API_KEY` in the environment (never on the board) or log in once by running `claude`. The machine must reach the board (see "Agents on different computers" below).
 
 ```bash
-git clone -b swarm-setup https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab   # main once merged
+git clone https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab
 
 # Smoke test: exactly one shift. Watch it on the dashboard.
 MAX_SHIFTS=1 swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmos-gpu
