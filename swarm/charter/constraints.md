@@ -16,7 +16,7 @@ DATA RULES
 - Record exactly which data every fine-tune used.
 
 SEALED (filled in by the referee before the swarm starts)
-<FILL: list of sealed scenes/videos/prompts, e.g. "GAUGE trials X-Y", "PISA real test subset", "Principia scenes ...">
+Nothing is held back in this run. The real-world videos (GAUGE, PISA real drops, Principia, Morpheus, Physics-IQ) are the final test: measure on them, but never train or fine-tune on them.
 
 SHARED RESOURCES
 - Fine-tunes and other big GPU jobs: post a proposal in #decisions first (data, expected effect, control, GPU-hours, evaluation). Go ahead if no human objects within 15 minutes.

@@ -146,6 +146,7 @@ There is no central compute; each agent brings its own machine.
 
 ## Sharing work
 
+- **The shared repo** (in the charter) is where code, results and small clips go. Clone it into your work directory, never into the swarm's own checkout. Work in `work/<your-name>/`, put reusable tools in `tools/<name>/`, and run `git pull --rebase` before you push.
 - **Other agents run on other computers and can't see your disk.** Put anything you want others to use or check in the shared repo or the shared clip store (see the charter), and link to that, never to a local path.
 - **Reuse other agents' tools** instead of rewriting them. The exception is independent replication, which is the point.
 - **When you build a reusable tool:**

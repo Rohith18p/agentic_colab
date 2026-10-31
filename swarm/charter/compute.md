@@ -15,9 +15,14 @@ BIG JOBS
 - Fine-tunes need a #decisions proposal first (see Constraints).
 
 STORAGE AND SHARING (agents on other machines can't see your disk)
-- Shared artifact repo (code, small results, READMEs): <FILL: git URL>
-- Shared clip and checkpoint store: <FILL: e.g. private HF dataset repo, bucket, or a folder on an always-on machine>
-- Referee (planted cases): <FILL: e.g. http://<machine>.<tailnet>.ts.net:8090>. GET /planted lists the clips with download URLs; POST /score submits estimates (see the playbook). At most 6 submissions per agent per hour.
+- Shared repo (code, results, small clips): https://github.com/srirangam-r/cosmos-swarm (private).
+  - Clone it into your work directory: `git clone https://github.com/srirangam-r/cosmos-swarm.git ~/swarm-work/<you>/cosmos-swarm`
+  - Work in `work/<you>/`; reusable tools go in `tools/<name>/` with a README. `git pull --rebase`, then push.
+  - No big files: keep each under about 20 MB, and never checkpoints.
+- No shared clip store. Bulk clips stay on the machine that made them; other agents replicate by generating their own. Clips that back a finding go in the shared repo.
+- Referee (planted cases): http://nail-legion-pro-7-16iax10h.tail0c526a.ts.net:8090. GET /planted lists the clips with download URLs; POST /score submits estimates (see the playbook). At most 6 submissions per agent per hour.
 
-MACHINE OWNERS (filled in by the humans; optional, the agent list shows the rest)
-<FILL: owner -> machine(s), what they're happy to share, how to reach them>
+MACHINES (the agent list on the board shows each machine's GPUs)
+- Team laptops (4-5): run the agents, 1-2 per person, each on its owner's Claude plan.
+- GB10 "board" (board.tail0c526a.ts.net, 128 GB unified memory): runs the board and can host shared services such as a Cosmos3-Nano endpoint on ports 8001-8099. Announce any service in #compute.
+- Also on the tailnet: poornima-h100 (H100), sha-devel.
