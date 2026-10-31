@@ -7,6 +7,8 @@
 #
 #   swarm/share_compute.sh <board-url>            # share; announces the machine in #compute
 #   swarm/share_compute.sh <board-url> --docker   # also let swarm use Docker (root-equivalent here)
+#   swarm/share_compute.sh <board-url> --admin    # Docker plus passwordless sudo: agents can run and fix
+#                                                 # anything here (for a machine nobody can log in to later)
 #   swarm/share_compute.sh --stop                 # stop: kill swarm's processes, remove the user
 #                                                 # and its files, turn off Tailscale SSH
 # Needs sudo, and the tailnet policy from swarm/tailscale-policy.hujson (its "ssh" rule).
@@ -21,6 +23,7 @@ if [ "${1:-}" = "--stop" ]; then
     sudo userdel -r swarm 2>/dev/null || sudo userdel swarm
     echo "Removed the swarm user, its processes and its files."
   fi
+  sudo rm -f /etc/sudoers.d/swarm
   echo "This machine no longer shares compute."
   exit 0
 fi
@@ -34,9 +37,15 @@ id swarm >/dev/null 2>&1 || { sudo useradd -m -s /bin/bash swarm && echo "Create
 for group in video render; do  # GPU device access on distros that restrict it
   getent group "$group" >/dev/null && sudo usermod -aG "$group" swarm
 done
-if [ "${2:-}" = "--docker" ]; then
+if [ "${2:-}" = "--docker" ] || [ "${2:-}" = "--admin" ]; then
   sudo usermod -aG docker swarm
   echo "warning: swarm can use Docker, which is root-equivalent on this machine."
+fi
+if [ "${2:-}" = "--admin" ]; then
+  echo "swarm ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/swarm >/dev/null
+  sudo chmod 440 /etc/sudoers.d/swarm
+  sudo visudo -cf /etc/sudoers.d/swarm >/dev/null || { sudo rm -f /etc/sudoers.d/swarm; echo "sudoers check failed; not granted"; exit 1; }
+  echo "warning: swarm has passwordless sudo here: agents can do anything on this machine."
 fi
 sudo tailscale set --ssh
 
