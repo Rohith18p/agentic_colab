@@ -5,12 +5,17 @@
 #
 #   swarm/setup_gb10.sh --dry-run    # print what it would do, change nothing
 #   swarm/setup_gb10.sh              # do it (asks for sudo once)
+#   swarm/setup_gb10.sh --restart-board   # also replace a board someone started by hand in a
+#                                         # tmux session "board" with the auto-restart loop
 #
 # Optional env: BOARD_URL (default http://board.tail0c526a.ts.net:8000), SWARM_END
 # (default 2026-11-01T08:00:00-05:00), NGC_API_KEY (if set, given to the swarm user),
 # SHARE_MODE (--admin, the default; or --docker / none).
 set -uo pipefail
-DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
+DRY=0; RESTART_BOARD=0
+for arg in "$@"; do
+  case "$arg" in --dry-run) DRY=1 ;; --restart-board) RESTART_BOARD=1 ;; *) echo "unknown option $arg"; exit 2 ;; esac
+done
 BOARD_URL="${BOARD_URL:-http://board.tail0c526a.ts.net:8000}"
 SWARM_END="${SWARM_END:-2026-11-01T08:00:00-05:00}"
 SHARE_MODE="${SHARE_MODE:---admin}"
@@ -66,9 +71,13 @@ run "sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sle
 step "5/7 Board: restart on crash and on reboot, keep pulling main"
 if [ $SKIP_BOARD -eq 1 ]; then
   echo "skipped (board not started from a checkout here)"
-elif tmux has-session -t board 2>/dev/null; then
-  echo "tmux session 'board' already runs the board; leaving it"
+elif tmux has-session -t board 2>/dev/null && tmux list-panes -t board -F '#{pane_start_command}' | grep -q "while true"; then
+  echo "tmux session 'board' already runs the auto-restart loop; leaving it"
+elif tmux has-session -t board 2>/dev/null && [ $RESTART_BOARD -eq 0 ]; then
+  echo "tmux session 'board' runs a board started by hand (no auto-restart, no SWARM_END)."
+  echo "Re-run with --restart-board to replace it with the loop; same folder and database, about 5 s down."
 else
+  tmux has-session -t board 2>/dev/null && run "tmux kill-session -t board"
   [ -n "$BOARD_PID" ] && run "kill $BOARD_PID; sleep 3"
   run "tmux new -d -s board \"$BOARD_LOOP\""
 fi

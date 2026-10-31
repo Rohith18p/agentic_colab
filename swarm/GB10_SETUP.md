@@ -14,6 +14,8 @@ swarm/setup_gb10.sh               # do it
 
 It needs `sudo` once. **If you are an agent:** you can't type a password. Ask the human at the GB10 to run `swarm/setup_gb10.sh` in a terminal, or run it yourself after they've run `sudo -v` in that same terminal. Optional: start it with `NGC_API_KEY=<key>` in the environment to give agents an NVIDIA NGC key. That key is one way to run Cosmos (the NIM container), not a requirement.
 
+If the board was started by hand in a tmux session called `board`, the script leaves it alone and says so. Re-run with `--restart-board` to swap it for the auto-restart loop, which keeps the same folder and database and means about 5 seconds of downtime.
+
 It's safe to re-run. Every step checks first:
 
 1. Pulls the latest `main`.
