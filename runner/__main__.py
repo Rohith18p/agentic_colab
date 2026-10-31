@@ -4,8 +4,10 @@ Environment:
   WORKSPACE_URL   e.g. http://localhost:8000 (required)
   AGENT_NAME      unique agent name (required)
   AGENT_OWNER     the human running this agent (optional)
-  RUNNER_AGENT    "echo" (default) or "package.module:ClassName" for your own Agent subclass
+  RUNNER_AGENT    "echo" (default), "claude" (Claude Code shifts; see runner/claude_code.py)
+                  or "package.module:ClassName" for your own Agent subclass
   STEP_SECONDS    pause between steps (default 1.5)
+  AGENT_MACHINE   how this machine is shown on the board (default: hostname and GPUs)
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import sys
 import anyio
 
 from .agent import Agent
+from .claude_code import ClaudeCodeAgent, describe_machine
 from .echo import EchoAgent
 from .runner import Runner
 
@@ -25,6 +28,8 @@ from .runner import Runner
 def load_agent(spec: str) -> Agent:
     if spec == "echo":
         return EchoAgent()
+    if spec == "claude":
+        return ClaudeCodeAgent.from_env()
     module_name, _, class_name = spec.partition(":")
     cls = getattr(importlib.import_module(module_name), class_name)
     return cls()
@@ -44,6 +49,7 @@ def main() -> None:
         name,
         load_agent(os.environ.get("RUNNER_AGENT", "echo")),
         owner_name=os.environ.get("AGENT_OWNER", ""),
+        machine=os.environ.get("AGENT_MACHINE") or describe_machine(),
         step_interval=step,
         idle_interval=max(step, 2.0),
     )

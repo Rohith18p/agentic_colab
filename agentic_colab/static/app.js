@@ -11,6 +11,7 @@ let messages = [];
 let replyTo = null;
 let editingCharter = false;
 let serverOffsetMs = 0;        // server clock minus browser clock
+let bootId = null;             // server process id; a new one means the server restarted
 
 // ---------------------------------------------------------------- helpers
 
@@ -139,7 +140,8 @@ function renderBoard() {
 }
 
 function renderThreads() {
-  const items = [{ channel: "general" }, { channel: "decisions" }]
+  const channels = state.settings.channels || ["general", "decisions"];
+  const items = channels.map((channel) => ({ channel }))
     .concat([...state.tasks].reverse().map((t) => ({ task_id: t.id })));
   const current = threadKey(thread);
   $("#threads").innerHTML = items.map((t) => {
@@ -245,6 +247,12 @@ function connectStream() {
   const es = new EventSource("/api/stream");
   es.onopen = () => { $("#live").textContent = "live"; $("#live").className = "pill"; };
   es.onerror = () => { $("#live").textContent = "reconnecting"; $("#live").className = "pill off"; };
+  // After a server restart (e.g. a hot reload), reload the page to pick up new JS/CSS/HTML.
+  es.addEventListener("hello", (e) => {
+    const id = JSON.parse(e.data).boot_id;
+    if (bootId && id !== bootId) location.reload();
+    bootId = id;
+  });
   es.addEventListener("workspace", (e) => {
     const ev = JSON.parse(e.data);
     if (ev.type === "message.posted" && inThread(ev.payload) && !messages.some((m) => m.id === ev.payload.id)) {

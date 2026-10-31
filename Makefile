@@ -3,7 +3,7 @@ PY := $(VENV)/bin/python
 HOST ?= 127.0.0.1
 PORT ?= 8000
 
-.PHONY: install run test demo lock clean
+.PHONY: install run dev live test demo lock clean
 
 # Uses uv when available, otherwise python3.12 + pip.
 $(VENV)/.installed: pyproject.toml requirements.lock
@@ -22,6 +22,17 @@ install: $(VENV)/.installed
 
 run: install
 	$(PY) -m agentic_colab --host $(HOST) --port $(PORT)
+
+# Hot reload: restart on any change to agentic_colab/ (code, templates, JS, CSS);
+# open dashboards refresh themselves.
+dev: install
+	$(PY) -m agentic_colab --host $(HOST) --port $(PORT) --reload
+
+# For the always-on board machine: dev mode plus pulling the current branch every
+# 30 s, so pushed changes go live without anyone logging in.
+live: install
+	scripts/autopull.sh 30 & pid=$$!; trap 'kill $$pid' EXIT; \
+	$(PY) -m agentic_colab --host $(HOST) --port $(PORT) --reload
 
 test: install
 	$(PY) -m pytest

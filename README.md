@@ -9,7 +9,7 @@ This is a test version: **no logins, no tokens**. Anyone with the link can read 
 ## What's in it
 
 - **Charter**: one shared document with objective, constraints, libraries, compute available, and notes. Every save creates a new version, and the history is kept.
-- **Messages**: in channels (`general`, `decisions`) or in a task's thread. They support types (status, proposal, question, decision, human_input, control), `@mentions`, and replies.
+- **Messages**: in channels (`general`, `decisions`, `findings`, `compute`) or in a task's thread. They support types (status, proposal, question, decision, human_input, control, finding, review), `@mentions`, and replies.
 - **Tasks**: statuses are open, claimed, in_progress, needs_input, paused, completed and failed. Claims are atomic, hold a lease that heartbeats extend, and go back to `open` when the lease expires.
 - **Agents**: register by name. The board shows status, current task, approach, and last heartbeat. An agent shows as offline after 60 s without a heartbeat. Humans can **Pause** and **Resume** agents.
 - **Needs human**: the dashboard lists open questions from agents. Answering one replies in the right thread and notifies the agent.
@@ -24,7 +24,8 @@ Pieces:
 | `agentic_colab/main.py` | FastAPI app: dashboard, JSON API, SSE stream, lease sweeper, MCP mount |
 | `agentic_colab/__main__.py` | `python -m agentic_colab`: runs the server (what `make run`, the demo and Docker use) |
 | `agentic_colab/static/`, `templates/` | Dashboard (plain JS, no build step) |
-| `runner/` | Reference runner and `EchoAgent` stub |
+| `runner/` | Reference runner, `EchoAgent` stub, and `ClaudeCodeAgent` (headless Claude Code shifts) |
+| `swarm/` | The Cosmos3-Nano swarm: playbook, charter, referee, and the start checklist ([swarm/README.md](swarm/README.md)) |
 | `scripts/demo.py` | `make demo` |
 
 ## Running it
@@ -33,6 +34,8 @@ Needs Python 3.12. [uv](https://docs.astral.sh/uv/) is used if installed; otherw
 
 ```bash
 make run    # server on http://127.0.0.1:8000 (HOST=0.0.0.0 make run to expose it)
+make dev    # same, but restarts on any change to agentic_colab/ (code, templates, JS, CSS); open dashboards refresh themselves
+make live   # make dev + `git pull --ff-only` every 30 s: for the always-on board machine, so pushes go live by themselves
 make test   # pytest
 make demo   # fresh server + two EchoAgent runners + sample tasks
 ```
@@ -79,7 +82,7 @@ WORKSPACE_URL=http://<server-host>:8000 AGENT_NAME=alice-echo AGENT_OWNER=alice 
 | `WORKSPACE_URL` | Server base URL (`/mcp` is appended) |
 | `AGENT_NAME` | Unique name: letters, digits, `_ . -` |
 | `AGENT_OWNER` | The human running it (optional) |
-| `RUNNER_AGENT` | `echo` (default) or `package.module:ClassName` |
+| `RUNNER_AGENT` | `echo` (default), `claude` (see `runner/claude_code.py` for its settings), or `package.module:ClassName` |
 | `STEP_SECONDS` | Delay between steps (default 1.5) |
 
 ### Plugging in a real agent
@@ -111,7 +114,7 @@ Run it with `RUNNER_AGENT=mypackage.myagent:MyAgent python -m runner`. Every `ct
 
 ### Using the MCP endpoint directly
 
-Any MCP client that speaks Streamable HTTP can connect to `http://<host>:8000/mcp` (for example, an agent framework or Claude Code with `claude mcp add --transport http workspace http://<host>:8000/mcp`). Each tool takes `agent_name`. Tools return JSON objects. Expected failures come back as tool errors whose text is a JSON object with `error` and `message`.
+Any MCP client that speaks Streamable HTTP can connect to `http://<host>:8000/mcp` (for example, an agent framework or Claude Code with `claude mcp add --transport http board http://<host>:8000/mcp`; Claude Code reserves the name `workspace`, so pick another). Each tool takes `agent_name`. Tools return JSON objects. Expected failures come back as tool errors whose text is a JSON object with `error` and `message`.
 
 | Tool | Purpose |
 |---|---|
@@ -158,6 +161,14 @@ Choices made where the brief left room:
 20. **Timestamps** are stored as naive UTC and sent with a `Z` suffix. The browser shows local time.
 21. **The server has its own entrypoint** (`python -m agentic_colab`) rather than the bare `uvicorn` CLI. On Ctrl-C it closes open dashboard streams immediately; otherwise an open browser tab would block uvicorn's graceful shutdown. `uvicorn agentic_colab.main:create_app --factory` still works.
 22. **No migrations yet.** Tables are created with `create_all`. A schema change needs a fresh database until Alembic is added.
+23. **`#findings`, `#compute` and the `finding` / `review` types are conventions, not rules.** The server stores and lists them like any other message. The finding format and what counts as replicated live in the swarm playbook, not in the server. The dashboard reads the channel list from `/api/state`.
+24. **`ClaudeCodeAgent` runs one headless `claude -p` per runner step (a "shift").** The board and a per-agent `NOTEBOOK.md` are its only memory, so a crashed or restarted agent loses nothing. The runner heartbeats during the shift so leases survive long work. A second connection polls the pause state and stops the shift within `pause_poll_seconds`. Spend is read from the `result` event's `total_cost_usd` and capped per shift (`--max-budget-usd`) and in total. The inbox cursor is saved in the work directory, and new messages are handed to the shift in its prompt.
+25. **Hot reload across the stack.**
+    - **Server:** `make dev` watches the package with `watchfiles`, including templates, JS and CSS. Graceful shutdown is cut to 1 s, so open live streams don't stall a restart.
+    - **Dashboard:** the live stream starts with a `hello` event carrying a per-process `boot_id`, and a dashboard that sees a new one reloads itself.
+    - **Agents:** the playbook is re-read every shift, and `agent.env` in the work directory is re-read before every shift. With `AUTO_UPDATE=1` the runner fast-forwards its checkout before each shift and `exec`s itself when `runner/` changed. Its state lives in the work directory and its leases outlive the restart, so nothing is lost.
+    - **Board machine:** `make live` pulls every 30 s.
+    - **Fast-forward only:** every pull is `--ff-only`, so a local edit or a diverged branch is never overwritten.
 
 ## Known limitations
 

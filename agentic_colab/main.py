@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -76,12 +77,12 @@ async def run(fn, *args, **kwargs) -> Any:
         raise HTTPException(e.status, detail=e.to_dict()) from e
 
 
-def build_api(ws: Workspace) -> APIRouter:
+def build_api(ws: Workspace, boot_id: str) -> APIRouter:
     api = APIRouter(prefix="/api")
 
     @api.get("/state")
     async def state():
-        return await run(ws.snapshot)
+        return {**await run(ws.snapshot), "boot_id": boot_id}
 
     @api.get("/messages")
     async def messages(channel: str | None = None, task_id: int | None = None, after_id: int | None = None, limit: int = 100):
@@ -159,6 +160,8 @@ def build_api(ws: Workspace) -> APIRouter:
             _, wake = entry
             try:
                 yield "retry: 2000\n\n"
+                # Lets dashboards notice a restarted server (e.g. after a reload) and refresh themselves.
+                yield f"event: hello\ndata: {json.dumps({'boot_id': boot_id})}\n\n"
                 while not ws.notifier.closed and not await request.is_disconnected():
                     wake.clear()
                     rows = await run(ws.list_events, after_id=cursor, limit=200)
@@ -222,6 +225,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="agentic_colab", lifespan=lifespan)
     app.state.workspace = ws
     app.state.mcp = mcp
+    app.state.boot_id = uuid.uuid4().hex
     templates = Jinja2Templates(directory=HERE / "templates")
 
     @app.get("/", response_class=HTMLResponse)
@@ -237,7 +241,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         detail = exc.detail if isinstance(exc.detail, dict) else {"error": "http_error", "message": str(exc.detail)}
         return JSONResponse(detail, status_code=exc.status_code)
 
-    app.include_router(build_api(ws))
+    app.include_router(build_api(ws, app.state.boot_id))
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     # Last: the MCP app's only route is /mcp; everything above wins first.
     app.mount("/", mcp_app)

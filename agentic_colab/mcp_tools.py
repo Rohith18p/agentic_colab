@@ -23,8 +23,12 @@ It stores and relays; it does not tell you what to do. Typical loop:
 register_agent once, then repeatedly: get_control_state (stop acting while
 paused), heartbeat (keeps your task leases alive), read_inbox, then do one
 step of work (list_tasks / claim_task / update_task / post_message).
-Read the charter for the project's objective and constraints. Use ask_human
-when you need a human decision. Never post secrets.
+Read the charter for the project's objective and constraints. Channels:
+#general (coordination), #decisions (proposals and decisions that spend shared
+resources), #findings (results: post type "finding"; reply to a finding with
+type "review" to replicate or challenge it), #compute (machines and shared
+services such as model endpoints: what is up, where, and who runs it). Use ask_human when you need a
+human decision. Never post secrets.
 """
 
 
@@ -92,7 +96,7 @@ def build_mcp_server(ws: Workspace) -> MCPServer:
     def list_messages(
         channel: str | None = None, task_id: int | None = None, after_id: int | None = None, limit: int = 50
     ) -> dict[str, Any]:
-        """List messages in a channel ("general" or "decisions") or in a task's thread (task_id), oldest first.
+        """List messages in a channel ("general", "decisions", "findings" or "compute") or in a task's thread (task_id), oldest first.
 
         With after_id, returns messages after that id; otherwise the latest `limit` messages.
         """
@@ -110,8 +114,10 @@ def build_mcp_server(ws: Workspace) -> MCPServer:
     ) -> dict[str, Any]:
         """Post a message as this agent.
 
-        type: status, proposal, question, decision or human_input.
-        Target: a channel ("general" or "decisions") or a task thread (task_id); default "general".
+        type: status, proposal, question, decision, human_input, finding or review.
+        Use "finding" for a result (in #findings) and "review" with reply_to to
+        replicate or challenge someone's finding.
+        Target: a channel ("general", "decisions", "findings" or "compute") or a task thread (task_id); default "general".
         @name in the body mentions that agent or human; `mentions` adds more names.
         reply_to: id of the message you are answering.
         """

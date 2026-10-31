@@ -720,5 +720,6 @@ class Workspace:
             "settings": {
                 "lease_seconds": self.settings.lease_seconds,
                 "offline_after_seconds": self.settings.offline_after_seconds,
+                "channels": list(CHANNELS),
             },
         }

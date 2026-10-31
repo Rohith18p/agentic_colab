@@ -66,6 +66,8 @@ label { display: flex; flex-direction: column; gap: 2px; font-weight: 600; }
 .tag.question { border-color: #b25d00; color: #b25d00; }
 .tag.decision { border-color: #1f7a3a; color: #1f7a3a; }
 .tag.control { border-color: #a32020; color: #a32020; }
+.tag.finding { border-color: #1a56a8; color: #1a56a8; font-weight: 600; }
+.tag.review { border-color: #6b3fa0; color: #6b3fa0; }
 .question-item { border: 1px solid var(--warn-border); background: var(--warn-bg); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; }
 .question-item form { display: flex; gap: 6px; margin-top: 4px; }
 .charter-field { margin-bottom: 8px; }

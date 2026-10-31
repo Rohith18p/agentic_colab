@@ -17,8 +17,8 @@ from .db import Base
 
 ACTOR_TYPES = ("human", "agent", "system")
 
-MESSAGE_TYPES = ("status", "proposal", "question", "decision", "human_input", "control")
-CHANNELS = ("general", "decisions")
+MESSAGE_TYPES = ("status", "proposal", "question", "decision", "human_input", "control", "finding", "review")
+CHANNELS = ("general", "decisions", "findings", "compute")
 
 TASK_STATUSES = ("open", "claimed", "in_progress", "needs_input", "paused", "completed", "failed")
 # Statuses in which a task is held by an agent under a lease.
