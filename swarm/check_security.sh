@@ -48,10 +48,10 @@ if curl -fsS --max-time 5 "${BOARD%/}/healthz" >/dev/null 2>&1; then ok "board r
 
 if [ "$ROLE" = "agent" ] && [[ "$addr" == 100.* || "$addr" == fd7a:115c:a1e0:* ]]; then
   # Tailscale drops packets the policy doesn't allow, so a blocked port times out; a closed but
-  # allowed port answers at once with "connection refused".
-  timeout 4 bash -c "exec 3<>/dev/tcp/$HOST/22" 2>/dev/null; rc=$?
-  if [ $rc -eq 124 ]; then ok "other ports on the board machine are blocked (port 22 timed out)"
-  else fail "port 22 on the board machine answered (rc=$rc), so the access policy isn't applied; paste swarm/tailscale-policy.hujson into the admin console"; fi
+  # allowed port answers at once with "connection refused". Port 9 is never allowed.
+  timeout 4 bash -c "exec 3<>/dev/tcp/$HOST/9" 2>/dev/null; rc=$?
+  if [ $rc -eq 124 ]; then ok "ports outside the policy are blocked on the board machine (port 9 timed out)"
+  else fail "port 9 on the board machine answered (rc=$rc), so the access policy isn't applied; paste swarm/tailscale-policy.hujson into the admin console"; fi
 elif [ "$ROLE" = "agent" ]; then
   fail "skipped the blocked-port check: the board isn't on the tailnet yet"
 else

@@ -23,18 +23,26 @@
 		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent"], "dst": ["tag:swarm-agent:8001-8099"]},
 	],
 
-	// No Tailscale SSH: nobody, human or agent, gets a shell on another machine through the tailnet.
-	"ssh": [],
+	// Shared compute: agents (and people) may SSH into any swarm machine, but only as the
+	// unprivileged "swarm" user that swarm/share_compute.sh creates on machines that opt in.
+	// Never as root or as the machine owner. "accept" (not "check") so agents can use it unattended.
+	"ssh": [
+		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent", "tag:swarm-board"], "dst": ["tag:swarm-agent", "tag:swarm-board"], "users": ["swarm"]},
+	],
 
 	"tests": [
 		{
 			"src":    "tag:swarm-agent",
 			"accept": ["tag:swarm-board:8000", "tag:swarm-board:8100", "tag:swarm-board:8001", "tag:swarm-agent:8001", "tag:swarm-agent:8099"],
-			"deny":   ["tag:swarm-board:22", "tag:swarm-board:8101", "tag:swarm-agent:22", "tag:swarm-agent:8000", "tag:swarm-agent:5432"],
+			"deny":   ["tag:swarm-board:8101", "tag:swarm-board:5432", "tag:swarm-agent:8000", "tag:swarm-agent:5432"],
 		},
 		{
 			"src":  "tag:swarm-board",
-			"deny": ["tag:swarm-agent:22", "tag:swarm-agent:8001"],
+			"deny": ["tag:swarm-agent:8001", "tag:swarm-agent:5432"],
 		},
+	],
+
+	"sshTests": [
+		{"src": "tag:swarm-agent", "dst": ["tag:swarm-board", "tag:swarm-agent"], "accept": ["swarm"], "deny": ["root"]},
 	],
 }

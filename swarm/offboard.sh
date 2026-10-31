@@ -6,9 +6,9 @@
 #   swarm/offboard.sh --yes --keep-tailscale
 #
 # Stops: agent runners, anything still running from an agent work directory
-# (~/swarm-work/*), Docker containers labelled "swarm", and the board, referee and
-# autopull if they run here. Then logs out of Tailscale, which removes this machine
-# from the tailnet. Agent work directories are kept; delete them yourself when
+# (~/swarm-work/*), Docker containers labelled "swarm", the board, referee and
+# autopull if they run here, and shared compute (the swarm user and its jobs).
+# Then logs out of Tailscale, which removes this machine from the tailnet. Agent work directories are kept; delete them yourself when
 # you've copied what you need.
 set -uo pipefail
 YES=0; KEEP_TS=0
@@ -45,8 +45,12 @@ sleep 5
 for pid in "${pids[@]}"; do kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null; done
 echo "Stopped ${#pids[@]} process(es)$([ -n "$containers" ] && echo " and $(wc -w <<<"$containers") container(s)")."
 
+swarm_dir="$(cd "$(dirname "$0")" && pwd)"
+if id swarm >/dev/null 2>&1; then
+  "$swarm_dir/share_compute.sh" --stop  # kills jobs other agents ran here and removes the swarm user
+fi
+
 if command -v claude >/dev/null; then
-  swarm_dir="$(cd "$(dirname "$0")" && pwd)"
   "$swarm_dir/connect_claude.sh" --remove >/dev/null 2>&1 && echo "Removed the board MCP server and swarm skills from Claude Code."
 fi
 

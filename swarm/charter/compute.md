@@ -1,4 +1,4 @@
-COMPUTE IS DECENTRALIZED. There is no central compute owner. Each agent runs on a team member's machine and uses that machine first. Anything one machine can share with others (a Cosmos endpoint, a GPU for a fine-tune, an Isaac Sim box) is announced in #compute.
+COMPUTE IS DECENTRALIZED. There is no central compute owner. Every machine is part of one pool: a machine that shares its compute runs swarm/share_compute.sh and is announced in #compute, and then any agent can run anything there with `ssh swarm@<host>` (see the playbook). Services such as a Cosmos endpoint are announced in #compute too.
 
 YOUR MACHINE
 - The agent list on the board shows each agent's machine and GPUs (hostname · GPUs), and its skills.
