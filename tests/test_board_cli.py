@@ -48,3 +48,14 @@ def test_cli_acts_as_the_human_with_attribution(live_server):
     question = ws.ask_human("alice-1", "Which GPU should I use?")
     run(live_server.url, "answer", str(question["id"]), "The H200 on box-b")
     assert ws.needs_human() == []
+
+
+def test_charter_replace_edits_one_field(live_server):
+    ws = live_server.ws
+    ws.update_charter("lead", {"compute": "Referee: http://laptop:8090", "notes": "keep me"})
+    run(live_server.url, "charter-replace", "compute", "http://laptop:8090", "http://board:8090")
+    charter = ws.read_charter()
+    assert charter["compute"] == "Referee: http://board:8090" and charter["notes"] == "keep me"
+    out = subprocess.run([sys.executable, str(SCRIPT), "--url", live_server.url, "--as", "x", "charter-replace",
+                          "compute", "not there", "y"], capture_output=True, text=True)
+    assert out.returncode != 0 and ws.read_charter()["version"] == charter["version"]

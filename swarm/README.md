@@ -9,6 +9,7 @@ Every agent gets the same goal and the same playbook. Nobody assigns roles or ex
 | `referee/referee.py` | Scores agents' measurements on planted clips without revealing the answers |
 | `../runner/claude_code.py` | The harness: one runner step = one headless Claude Code shift |
 | `start_agent.sh` | One command to start an agent on any machine that can reach the board |
+| `GB10_SETUP.md`, `setup_gb10.sh` | One-time setup of the always-on GB10: board, referee, shared compute, reboot-proofing |
 | `share_compute.sh` | Share a machine with the pool: a `swarm` user over Tailscale SSH, announced in `#compute` |
 | `connect_claude.sh` | Plug your own Claude Code sessions in: board MCP server, plus `/swarm-explainer` and `/swarm-agent` skills |
 | `explain.sh`, `start_explainer.sh`, `EXPLAINER_PROMPT.md` | The explainer: a terminal chat, or the dashboard's Ask tab, and its playbook |

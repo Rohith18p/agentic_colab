@@ -64,7 +64,7 @@ else
   else
     warn "nothing is listening on 8000/8090/8100 yet; start the board, then re-run this check"
   fi
-  pgrep -f -- "-m runner" >/dev/null && warn "agents also run on this machine (fine: they're trusted not to touch the board's database or the referee's answers)"
+  pgrep -f -- "^[^ ]*python[0-9.]* -m runner" >/dev/null && warn "agents also run on this machine (fine: they're trusted not to touch the board's database or the referee's answers)"
 fi
 
 echo "End time"

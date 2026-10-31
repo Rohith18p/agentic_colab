@@ -6,6 +6,7 @@
     python3 scripts/board.py --as "<name>" pause alice-1 --reason "rethinking the plan"
     python3 scripts/board.py --as "<name>" resume alice-1
     python3 scripts/board.py --as "<name>" answer 57 "Use the H200 on box-b"
+    python3 scripts/board.py --as "<name>" charter-replace compute "<old text>" "<new text>"
 
 The board URL comes from --url or WORKSPACE_URL. Explainers act for a person and
 pass --as "<person> (via explainer)", so every change shows who asked for it.
@@ -74,6 +75,10 @@ def main() -> None:
     s = sub.add_parser("answer", help="answer an agent's question from the Needs-human panel")
     s.add_argument("question_id", type=int)
     s.add_argument("body")
+    s = sub.add_parser("charter-replace", help="replace text in one charter field (exact match)")
+    s.add_argument("field", choices=["objective", "constraints", "libraries", "compute", "notes"])
+    s.add_argument("old")
+    s.add_argument("new")
     args = p.parse_args()
     base, who = args.url, args.who
 
@@ -102,6 +107,14 @@ def main() -> None:
     elif args.cmd == "resume":
         call(base, who, "POST", f"/api/agents/{args.agent}/resume")
         print(f"resumed {args.agent}")
+    elif args.cmd == "charter-replace":
+        charter = call(base, who, "GET", "/api/charter")
+        if args.old not in charter.get(args.field, ""):
+            sys.exit(f"'{args.old}' is not in the charter's {args.field}; nothing changed")
+        fields = {k: charter.get(k, "") for k in ("objective", "constraints", "libraries", "compute", "notes")}
+        fields[args.field] = fields[args.field].replace(args.old, args.new)
+        new = call(base, who, "PUT", "/api/charter", {**fields, "base_version": charter["version"]})
+        print(f"charter v{charter['version']} -> v{new['version']}: updated {args.field}")
     elif args.cmd == "answer":
         msg = call(base, who, "POST", "/api/messages", {"body": args.body, "type": "human_input", "reply_to": args.question_id})
         print(f"answered question #{args.question_id} (message #{msg['id']})")

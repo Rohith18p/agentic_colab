@@ -29,6 +29,10 @@ for proc in /proc/[0-9]*; do
     printf '  %-8s %s\n' "$pid" "${cmd:0:120}"
   fi
 done
+sessions=$(tmux ls -F '#S' 2>/dev/null | grep -x -e board -e referee || true)
+[ -n "$sessions" ] && echo "  tmux sessions (auto-restart loops): $(echo $sessions)"
+cron_lines=$(crontab -l 2>/dev/null | grep -c '# swarm-' || true)
+[ "${cron_lines:-0}" -gt 0 ] && echo "  crontab: $cron_lines swarm reboot entr$([ "$cron_lines" = 1 ] && echo y || echo ies)"
 containers=$(command -v docker >/dev/null && docker ps -q --filter label=swarm 2>/dev/null || true)
 [ -n "$containers" ] && docker ps --filter label=swarm --format '  container {{.ID}} {{.Image}} {{.Names}}'
 [ ${#pids[@]} -eq 0 ] && [ -z "$containers" ] && echo "  no swarm processes or containers running"
@@ -39,6 +43,9 @@ if [ $YES -eq 0 ]; then
   exit 0
 fi
 
+# Stop the restart loops and reboot entries first, or they bring the board and referee back.
+for s in $sessions; do tmux kill-session -t "$s" 2>/dev/null; done
+[ "${cron_lines:-0}" -gt 0 ] && crontab -l 2>/dev/null | grep -v '# swarm-' | crontab -
 [ ${#pids[@]} -gt 0 ] && kill -TERM "${pids[@]}" 2>/dev/null
 [ -n "$containers" ] && docker stop $containers >/dev/null
 sleep 5
