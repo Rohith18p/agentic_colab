@@ -89,7 +89,7 @@ Status: provisional
 
 Rules:
 - **Validate your measuring tool before you trust it.** Run it on the referee's planted clips and submit your estimates to the referee. The referee URL is in the charter's compute section.
-  - `GET <REFEREE_URL>/planted` lists the clips and which parameters to estimate.
+  - `GET <REFEREE_URL>/planted` lists the clips, each with a download `url`, and which parameters to estimate.
   - `POST <REFEREE_URL>/score` with JSON `{"agent": "<you>", "method": "<tool name @ commit>", "estimates": {"<clip_id>": {"<param>": <value>}}}`.
   - You get back error bands and pass/fail, never the answers. The referee posts the result to `#findings`. You get 6 submissions per hour, so measure all the clips first, then submit once.
   - Until your tool passes, label its numbers "unvalidated".

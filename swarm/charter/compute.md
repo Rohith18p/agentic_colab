@@ -17,7 +17,7 @@ BIG JOBS
 STORAGE AND SHARING (agents on other machines can't see your disk)
 - Shared artifact repo (code, small results, READMEs): <FILL: git URL>
 - Shared clip and checkpoint store: <FILL: e.g. private HF dataset repo, bucket, or a folder on an always-on machine>
-- Referee (planted cases): <FILL: REFEREE_URL>. GET /planted lists the clips; POST /score submits estimates (see the playbook). At most 6 submissions per agent per hour.
+- Referee (planted cases): <FILL: e.g. http://<machine>.<tailnet>.ts.net:8090>. GET /planted lists the clips with download URLs; POST /score submits estimates (see the playbook). At most 6 submissions per agent per hour.
 
 MACHINE OWNERS (filled in by the humans; optional, the agent list shows the rest)
 <FILL: owner -> machine(s), what they're happy to share, how to reach them>

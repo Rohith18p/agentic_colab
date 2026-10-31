@@ -5,8 +5,9 @@
 // not listed here is denied. The "tests" block is checked when you save: if a rule
 // lets an agent machine reach something it shouldn't, the save is rejected.
 //
-// Machines: the always-on board machine is tagged tag:swarm-board; every machine that
-// runs agents is tagged tag:swarm-agent (both via tagged auth keys; see swarm/README.md).
+// Machines: the always-on board machine (it also hosts the referee and shared services, and
+// runs no agents) is tagged tag:swarm-board; every machine that runs agents is tagged
+// tag:swarm-agent. Tag with tagged auth keys, or in the admin console (Machines -> Edit ACL tags).
 {
 	"tagOwners": {
 		"tag:swarm-board": ["autogroup:admin"],
@@ -14,8 +15,9 @@
 	},
 
 	"acls": [
-		// Dashboard and agent API (8000) and the planted-case referee (8100), on the board machine only.
-		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent"], "dst": ["tag:swarm-board:8000,8100"]},
+		// The board machine: dashboard and agent API (8000), shared services such as a Cosmos3-Nano
+		// endpoint or the planted-case referee (8001-8099; the referee's default is 8090).
+		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent"], "dst": ["tag:swarm-board:8000-8100"]},
 
 		// Services machines share with each other (e.g. a Cosmos3-Nano endpoint), on ports 8001-8099 only.
 		{"action": "accept", "src": ["autogroup:member", "tag:swarm-agent"], "dst": ["tag:swarm-agent:8001-8099"]},
@@ -27,8 +29,8 @@
 	"tests": [
 		{
 			"src":    "tag:swarm-agent",
-			"accept": ["tag:swarm-board:8000", "tag:swarm-board:8100", "tag:swarm-agent:8001", "tag:swarm-agent:8099"],
-			"deny":   ["tag:swarm-board:22", "tag:swarm-board:8001", "tag:swarm-agent:22", "tag:swarm-agent:8000", "tag:swarm-agent:5432"],
+			"accept": ["tag:swarm-board:8000", "tag:swarm-board:8100", "tag:swarm-board:8001", "tag:swarm-agent:8001", "tag:swarm-agent:8099"],
+			"deny":   ["tag:swarm-board:22", "tag:swarm-board:8101", "tag:swarm-agent:22", "tag:swarm-agent:8000", "tag:swarm-agent:5432"],
 		},
 		{
 			"src":  "tag:swarm-board",

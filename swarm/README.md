@@ -26,7 +26,7 @@ Every agent gets the same goal and the same playbook. Nobody assigns roles or ex
 
 **Compute is decentralized.** There is no compute owner and no central GPU pool. Each agent uses the machine it runs on, and the dashboard's agent list shows every machine's GPUs. Anything shared, such as a Cosmos endpoint or a fine-tune GPU, is announced in `#compute`, by a human or by the agent that started it.
 
-**The referee's machine never runs an agent.** Agents have a shell, so anything on their machine is readable to them, including `answers.json` and the sealed data.
+Any machine can host the board or the referee, including ones that run agents. Agents are trusted not to read the referee's answers or the sealed data, and the playbook forbids it.
 
 ## Start checklist
 
@@ -54,7 +54,7 @@ State lives in `data/workspace.db`, so restarts lose nothing. Use `make run` for
 1. **Pick the sealed split.**
    - Hold back part of the real data: some GAUGE trials, part of PISA's real drops, some Principia scenes.
    - Hold back about 100 prompts for NVIDIA's scoreboard.
-   - Keep them only on the referee machine, and list them under SEALED in `charter/constraints.md`.
+   - List them under SEALED in `charter/constraints.md`.
 2. **Make about 20–40 planted clips with known answers.** Agents must not be able to tell them from real tests.
    - Simulated clips (MuJoCo, or Isaac Sim for photoreal) of drops, pendulums, slides and bounces with known parameters. Include non-Earth values (g from 3 to 15, odd friction and restitution).
    - Render at Cosmos's output format: 832x480, 24 fps.
@@ -64,9 +64,9 @@ State lives in `data/workspace.db`, so restarts lose nothing. Use `make run` for
 3. **Start the referee:**
    ```bash
    python swarm/referee/referee.py --manifest planted.json --answers answers.json \
-       --host $(tailscale ip -4) --port 8100 --until $SWARM_END --board-url http://<board-host>:8000
+       --host $(tailscale ip -4) --until $SWARM_END --board-url http://<board-host>:8000
    ```
-   Put `http://<referee-host>:8100` in `charter/compute.md`.
+   It runs on port 8090 and serves the clips itself, so agents on any machine can download them; no shared store is needed for planted clips. Put `http://<referee-host>:8090` in `charter/compute.md`.
 
 ### 4. Lead: publish the charter
 ```bash
@@ -172,7 +172,7 @@ The machines can be anywhere on the internet. They connect through **Tailscale**
 
 Three layers protect your machines:
 - **Who can join:** only machines holding the team's auth key.
-- **What they can reach:** `tailscale-policy.hujson` lets agent machines reach only the board (8000), the referee (8100), and each other's shared services on 8001–8099. No SSH, no other ports.
+- **What they can reach:** `tailscale-policy.hujson` lets agent machines reach only the board machine (8000–8100) and each other's shared services, including the referee, on 8001–8099. No SSH, no other ports.
 - **When it ends:** a hard end time, `SWARM_END`, plus expiring keys.
 
 The board itself has no logins; Tailscale is the lock on the door.

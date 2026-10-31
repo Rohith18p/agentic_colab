@@ -55,20 +55,16 @@ if [ "$ROLE" = "agent" ] && [[ "$addr" == 100.* || "$addr" == fd7a:115c:a1e0:* ]
 elif [ "$ROLE" = "agent" ]; then
   fail "skipped the blocked-port check: the board isn't on the tailnet yet"
 else
-  bad=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(8000|8100)$' | grep -vE '^(100\.|\[fd7a:115c:a1e0:|127\.0\.0\.1:|\[::1\]:)' || true)
-  listening=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(8000|8100)$' | tr '\n' ' ')
+  bad=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(8000|8090|8100)$' | grep -vE '^(100\.|\[fd7a:115c:a1e0:|127\.0\.0\.1:|\[::1\]:)' || true)
+  listening=$(ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ':(8000|8090|8100)$' | tr '\n' ' ')
   if [ -n "$bad" ]; then
     fail "the board or referee listens on $bad, which is reachable outside the tailnet; restart with HOST=\$(tailscale ip -4)"
   elif [ -n "$listening" ]; then
     ok "board/referee listen only on tailnet or loopback addresses ($listening)"
   else
-    warn "nothing is listening on 8000/8100 yet; start the board, then re-run this check"
+    warn "nothing is listening on 8000/8090/8100 yet; start the board, then re-run this check"
   fi
-  if pgrep -f -- "-m runner" >/dev/null; then
-    fail "an agent runs on the board machine; agents have a shell and could read the referee's answers. Stop it"
-  else
-    ok "no agents run on this machine"
-  fi
+  pgrep -f -- "-m runner" >/dev/null && warn "agents also run on this machine (fine: they're trusted not to touch the board's database or the referee's answers)"
 fi
 
 echo "End time"

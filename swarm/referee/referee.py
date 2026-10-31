@@ -1,12 +1,15 @@
 """Referee for planted cases: scores agents' measurements without revealing the answers.
 
 The referee holds clips with known physical parameters (e.g. simulated drops
-with g = 6.0). Agents measure them with their tools and submit estimates. The
-referee answers only with error bands and pass/fail, rate-limits each agent,
-and posts every result to the board's #findings channel so humans see it.
+with g = 6.0). Agents download the clips from it, measure them with their tools
+and submit estimates. The referee answers only with error bands and pass/fail,
+rate-limits each agent, and posts every result to the board's #findings channel
+so humans see it. It runs on any machine on the tailnet.
 
     python swarm/referee/referee.py --manifest planted.json --answers answers.json \
-        --port 8100 --board-url http://<board-host>:8000
+        --board-url http://<board-host>:8000
+
+GET /planted lists the clips with a download URL each (GET /clips/<file>).
 
 manifest.json (public; served at GET /planted):
     {"clips": [{"clip_id": "drop-017", "path": "<store>/planted/drop-017.mp4", "fps": 24,
@@ -64,6 +67,8 @@ class Referee:
         self.limit_per_hour = limit_per_hour
         self.board_url = board_url.rstrip("/") if board_url else None
         self.log_path = log_path
+        # Downloadable clip files by name, resolved from the manifest's paths.
+        self.clip_files = {Path(c["path"]).name: Path(c["path"]) for c in manifest.get("clips", []) if c.get("path")}
         self._recent: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
 
@@ -153,10 +158,25 @@ def make_handler(ref: Referee) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(data)
 
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.rstrip("/") in ("", "/planted"):
-                self._send(200, ref.manifest)
-            else:
-                self._send(404, {"error": "not_found"})
+            path = self.path.split("?", 1)[0].rstrip("/")
+            if path in ("", "/planted"):
+                base = f"http://{self.headers.get('Host', 'localhost')}/clips/"
+                clips = [{**{k: v for k, v in c.items() if k != "path"}, "url": base + Path(c["path"]).name}
+                         for c in ref.manifest.get("clips", [])]
+                return self._send(200, {**ref.manifest, "clips": clips})
+            if path.startswith("/clips/"):
+                # Only files listed in the manifest are served; never the answers.
+                clip = ref.clip_files.get(path.removeprefix("/clips/"))
+                if clip is None or not clip.is_file():
+                    return self._send(404, {"error": "not_found"})
+                data = clip.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            self._send(404, {"error": "not_found"})
 
         def do_POST(self) -> None:  # noqa: N802
             if self.path.rstrip("/") != "/score":
@@ -186,7 +206,7 @@ def main() -> None:
     p.add_argument("--manifest", required=True)
     p.add_argument("--answers", required=True)
     p.add_argument("--host", default="0.0.0.0")
-    p.add_argument("--port", type=int, default=8100)
+    p.add_argument("--port", type=int, default=8090)
     p.add_argument("--board-url", help="post results to this board's #findings")
     p.add_argument("--tolerance", type=float, default=0.10, help="relative error that counts as correct")
     p.add_argument("--pass-rate", type=float, default=0.9)
