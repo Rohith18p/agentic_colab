@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from pathlib import Path
 from datetime import datetime, timezone
 
 import anyio
@@ -14,6 +15,7 @@ from runner import Runner
 from runner.__main__ import load_agent
 from runner.agy import AgyAgent
 from runner.codex import CodexAgent
+from runner.kiro import KiroAgent
 
 from .conftest import wait_until
 
@@ -47,6 +49,24 @@ step(2, text_delta="did an agy thing")
 print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": "did an agy thing"}}), flush=True)
 """
 
+FAKE_KIRO = """\
+import json, os, sys
+with open(os.path.join(os.getcwd(), "calls.jsonl"), "a") as f:
+    f.write(json.dumps({"args": sys.argv[1:], "api_key": "OPENAI_API_KEY" in os.environ}) + "\\n")
+ev = lambda t, **d: print(json.dumps({"type": t, "data": d}), flush=True)
+chunk = lambda text: ev("sessionUpdate", sessionId="s", update={
+    "sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": text}})
+print("[INFO] kas.server.starting", flush=True)
+ev("runStarted", payloadSchema="acp", engine="v2")
+chunk("looking ")
+chunk("around")
+if os.environ.get("FAKE_LIMIT"):
+    print("[ERROR] " + os.environ.get("FAKE_LIMIT_TEXT", "You have reached the usage limit for your plan."), flush=True)
+    ev("runFinished", sessionId="s", status="error", stopReason="error", finalText="")
+    sys.exit(1)
+ev("metadata", sessionId="s", meteringUsage=[{"value": 0.5, "unit": "credit"}, {"value": 0.25, "unit": "credit"}])
+ev("runFinished", sessionId="s", status="success", stopReason="end_turn", finalText="did a kiro thing")
+"""
 
 def make(cls, tmp_path, monkeypatch, fake: str, env_cmd: str):
     script = tmp_path / "fake_cli.py"
@@ -57,7 +77,7 @@ def make(cls, tmp_path, monkeypatch, fake: str, env_cmd: str):
     monkeypatch.setenv("AGENT_PROMPT_FILE", str(playbook))
     monkeypatch.setenv("AGENT_WORKDIR", str(tmp_path / "work"))
     monkeypatch.setenv("MAX_SHIFTS", "1")
-    for var in ("AGENT_MODEL", "AGENT_EFFORT", "AGENT_MODE", "AUTO_UPDATE", "SWARM_END"):
+    for var in ("AGENT_MODEL", "AGENT_EFFORT", "AGENT_MODE", "KIRO_ENGINE", "AUTO_UPDATE", "SWARM_END"):
         monkeypatch.delenv(var, raising=False)
     agent = cls.from_env()
     agent.pause_poll_seconds = 0.2
@@ -220,3 +240,44 @@ def test_rate_limits_wait_minutes_and_usage_limits_wait_longer():
     assert is_rate_limit("Codex rate limit") and is_rate_limit("agy too many requests")
     for usage in ("Codex usage limit", "You've hit your 5-hour limit", "agy quota reached", "agy RESOURCE_EXHAUSTED"):
         assert not is_rate_limit(usage)
+
+
+def test_runner_agent_name_kiro():
+    agent = load_agent("kiro")
+    assert type(agent) is KiroAgent and agent.model == "claude-opus-5.5" and agent.engine == "v2"
+
+
+@pytest.mark.anyio
+async def test_kiro_shift_uses_a_workspace_mcp_config(live_server, tmp_path, monkeypatch):
+    agent = make(KiroAgent, tmp_path, monkeypatch, FAKE_KIRO, "KIRO_CMD")
+    report, tags = await run_one_shift(live_server, agent, "kiro-t")
+
+    config = json.loads((tmp_path / "work" / ".kiro" / "settings" / "mcp.json").read_text())
+    assert config["mcpServers"]["board"] == {"url": live_server.url.rstrip("/") + "/mcp"}
+    args = calls(tmp_path)[0]["args"]
+    assert args[0] == "chat" and "--no-interactive" in args and "--trust-all-tools" in args
+    assert args[args.index("--model") + 1] == "claude-opus-5.5" and args[args.index("--agent-engine") + 1] == "v2"
+    assert args[args.index("--output-format") + 1] == "stream-json" and "--effort" not in args
+    assert args[-1].startswith("Be a good swarm agent.")
+    assert report.startswith("Shift 1") and "Kiro claude-opus-5.5, 0.75 credits" in report
+    assert "did a kiro thing" in report and "looking around" not in report
+    assert {"model:claude-opus-5.5", "effort:default"} <= tags
+
+
+@pytest.mark.anyio
+async def test_kiro_usage_limit_backs_off(live_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_LIMIT", "1")
+    agent = make(KiroAgent, tmp_path, monkeypatch, FAKE_KIRO, "KIRO_CMD")
+    report, _ = await run_one_shift(live_server, agent, "kiro-limit")
+    assert agent.state.blocked_until is not None and "Kiro usage limit" in report
+    assert "looking around" in report  # the last thing it said before the error
+
+
+def test_kiro_ignores_limit_words_in_agent_output():
+    from runner.claude_code import ShiftResult
+    agent = KiroAgent(prompt_file=Path("p.md"), workdir=Path("w"))
+    result = ShiftResult()
+    agent._parse_event(json.dumps({"type": "sessionUpdate", "data": {"update": {
+        "sessionUpdate": "agent_message_chunk", "content": {"text": "the queue hit a rate limit"}}}}).encode(), result)
+    agent._parse_event(b"[INFO] throttle settings loaded", result)
+    assert result.limit is None

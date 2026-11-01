@@ -12,7 +12,8 @@
 # AUTO_UPDATE (see runner/claude_code.py). There are no spend caps.
 #
 # Other agent CLIs: AGENT_CLI=codex (OpenAI Codex, `codex login`; runner/codex.py) or
-# AGENT_CLI=agy (Google Antigravity, `agy` login; runner/agy.py) runs the shifts with that CLI
+# AGENT_CLI=agy (Google Antigravity, `agy` login; runner/agy.py) or AGENT_CLI=kiro (Kiro CLI,
+# `kiro-cli login`; runner/kiro.py) runs the shifts with that CLI
 # instead of Claude Code, on its owner's plan. Default: AGENT_CLI=claude.
 #
 # Hot reload: the agent pulls this repo before every shift (AUTO_UPDATE=1) and
@@ -28,8 +29,8 @@ BOARD="${BOARD%/}"
 CLI="${AGENT_CLI:-claude}"
 cd "$(dirname "$0")/.."
 case "$CLI" in
-  claude|codex|agy) ;;
-  *) echo "AGENT_CLI must be claude, codex or agy (got: $CLI)."; exit 1 ;;
+  claude|codex|agy|kiro) ;;
+  *) echo "AGENT_CLI must be claude, codex, agy or kiro (got: $CLI)."; exit 1 ;;
 esac
 
 # SWARM_END is optional: the board's end time (set by humans with `board.py swarm-end`) wins every step.
@@ -43,11 +44,13 @@ if ! curl -fsS --max-time 5 "$BOARD/api/state" >/dev/null; then
   exit 1
 fi
 if [ "$CLI" = agy ] && [ -d "$HOME/.gemini/antigravity-cli/bin" ]; then export PATH="$HOME/.gemini/antigravity-cli/bin:$PATH"; fi
-if ! command -v "$CLI" >/dev/null; then
+CLI_CMD="$CLI"; [ "$CLI" = kiro ] && CLI_CMD="${KIRO_CMD:-kiro-cli}"
+if ! command -v "$CLI_CMD" >/dev/null; then
   case "$CLI" in
     claude) echo "Claude Code is not installed on this machine. Install it, then log in once by running 'claude'." ;;
     codex) echo "The Codex CLI is not installed on this machine. Install it, then run 'codex login'." ;;
     agy) echo "The Antigravity CLI (agy) is not installed on this machine. Install it, then log in once by running 'agy'." ;;
+    kiro) echo "The Kiro CLI (kiro-cli) is not installed on this machine. Install it, then run 'kiro-cli login'." ;;
   esac
   exit 1
 fi
@@ -66,6 +69,13 @@ if [ "$CLI" = codex ]; then
 elif [ "$CLI" = agy ]; then
   echo "Billing: your Antigravity login. Model: ${AGENT_MODEL:-gemini-4-argon-low}."
   echo "The board is added to agy's MCP config (~/.gemini/config/mcp_config.json); your other servers stay."
+elif [ "$CLI" = kiro ]; then
+  if ! "$CLI_CMD" whoami >/dev/null 2>&1; then
+    echo "Not starting: the Kiro CLI isn't logged in on this machine. Run 'kiro-cli login', then try again."
+    exit 1
+  fi
+  echo "Billing: your Kiro login's credits. Model: ${AGENT_MODEL:-claude-opus-5.5}."
+  echo "The board goes in the agent's workspace MCP config (<workdir>/.kiro/settings/mcp.json); your global config stays."
 fi
 # Shifts run on your `claude` login, so they use your plan's included usage. The harness removes
 # ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from every shift unless ALLOW_API_BILLING=1, because in

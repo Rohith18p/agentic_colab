@@ -6,8 +6,8 @@ Environment:
                   uses it, the runner registers an alias such as <name>-<owner> (runner.py)
   AGENT_OWNER     the human running this agent (optional)
   RUNNER_AGENT    "echo" (default), "claude" (Claude Code shifts; see runner/claude_code.py),
-                  "codex" (runner/codex.py), "agy" (Antigravity; runner/agy.py)
-                  or "package.module:ClassName" for your own Agent subclass
+                  "codex" (runner/codex.py), "agy" (Antigravity; runner/agy.py),
+                  "kiro" (Kiro CLI; runner/kiro.py) or "package.module:ClassName" for your own Agent subclass
   STEP_SECONDS    pause between steps (default 1.5)
   AGENT_MACHINE   how this machine is shown on the board (default: hostname and GPUs)
 """
@@ -40,6 +40,10 @@ def load_agent(spec: str) -> Agent:
         from .agy import AgyAgent
 
         return AgyAgent.from_env()
+    if spec == "kiro":
+        from .kiro import KiroAgent
+
+        return KiroAgent.from_env()
     module_name, _, class_name = spec.partition(":")
     cls = getattr(importlib.import_module(module_name), class_name)
     return cls()
