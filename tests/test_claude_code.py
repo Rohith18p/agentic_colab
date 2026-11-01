@@ -127,13 +127,13 @@ def test_agent_env_changes_settings_between_shifts(tmp_path):
     agent = make_agent(tmp_path, total_budget_usd=1.0)
     (tmp_path / "work").mkdir()
     agent._reload_settings("x")  # no file: defaults stay
-    assert agent.model == "claude-sonnet-5-5"
+    assert agent.model == "claude-opus-5-5"
     (tmp_path / "work" / "agent.env").write_text(
-        "# owner overrides\nAGENT_MODEL=claude-opus-5-5\nexport SHIFT_BUDGET_USD='2.5'\nTOTAL_BUDGET_USD=\nNOT_A_SETTING=1\n"
+        "# owner overrides\nAGENT_MODEL=claude-sonnet-5-5\nexport SHIFT_BUDGET_USD='2.5'\nTOTAL_BUDGET_USD=\nNOT_A_SETTING=1\n"
     )
     agent._announced_stop = True
     agent._reload_settings("x")
-    assert agent.model == "claude-opus-5-5" and agent.shift_budget_usd == 2.5
+    assert agent.model == "claude-sonnet-5-5" and agent.shift_budget_usd == 2.5
     assert agent.total_budget_usd is None and agent._announced_stop is False
 
 

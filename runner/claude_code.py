@@ -20,12 +20,12 @@ Hot reload between shifts:
 
 Environment (all optional except what the Runner needs):
   AGENT_CMD            command that runs Claude Code (default "claude")
-  AGENT_MODEL          model for every shift (default "claude-sonnet-5-5")
+  AGENT_MODEL          model for every shift (default "claude-opus-5-5")
   AGENT_PROMPT_FILE    playbook appended to the system prompt (default swarm/AGENT_PROMPT.md)
   AGENT_WORKDIR        persistent working directory (default ~/swarm-work/<AGENT_NAME>)
   AGENT_SKILLS         comma-separated machine capabilities, e.g. "cosmos-gpu,isaac-sim"
-  SHIFT_BUDGET_USD     spend cap per shift, passed as --max-budget-usd (default 1.50)
-  TOTAL_BUDGET_USD     stop starting shifts after this much spend (default 40)
+  SHIFT_BUDGET_USD     spend cap per shift, passed as --max-budget-usd (default 3.00; Opus costs twice Sonnet per token)
+  TOTAL_BUDGET_USD     stop starting shifts after this much spend (default 120)
   MAX_SHIFTS           run this many shifts, then exit the runner (counted per start, so
                        MAX_SHIFTS=1 is a one-shift smoke test; default: no limit)
   SHIFT_TIMEOUT_SECONDS  stop a shift that runs longer than this (default 2700)
@@ -257,12 +257,12 @@ class ClaudeCodeAgent(Agent):
         self,
         *,
         command: list[str] | None = None,
-        model: str = "claude-sonnet-5-5",
+        model: str = "claude-opus-5-5",
         prompt_file: Path | str | None = None,
         workdir: Path | str | None = None,
         skills: list[str] | None = None,
-        shift_budget_usd: float = 1.5,
-        total_budget_usd: float | None = 40.0,
+        shift_budget_usd: float = 3.0,
+        total_budget_usd: float | None = 120.0,
         max_shifts: int | None = None,
         shift_timeout_seconds: float = 2700,
         permission_mode: str = "default",
@@ -316,12 +316,12 @@ class ClaudeCodeAgent(Agent):
         max_shifts = os.environ.get("MAX_SHIFTS")
         return cls(
             command=shlex.split(os.environ.get("AGENT_CMD", "claude")),
-            model=os.environ.get("AGENT_MODEL", "claude-sonnet-5-5"),
+            model=os.environ.get("AGENT_MODEL", "claude-opus-5-5"),
             prompt_file=os.environ.get("AGENT_PROMPT_FILE") or None,
             workdir=os.environ.get("AGENT_WORKDIR") or None,
             skills=[s.strip() for s in os.environ.get("AGENT_SKILLS", "").split(",") if s.strip()],
-            shift_budget_usd=_env_float("SHIFT_BUDGET_USD", 1.5),
-            total_budget_usd=_env_float("TOTAL_BUDGET_USD", 40.0),
+            shift_budget_usd=_env_float("SHIFT_BUDGET_USD", 3.0),
+            total_budget_usd=_env_float("TOTAL_BUDGET_USD", 120.0),
             max_shifts=int(max_shifts) if max_shifts else None,
             shift_timeout_seconds=_env_float("SHIFT_TIMEOUT_SECONDS", 2700),
             permission_mode=os.environ.get("PERMISSION_MODE", "default"),
