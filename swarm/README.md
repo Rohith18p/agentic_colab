@@ -93,7 +93,7 @@ The harness copies those two definitions into every shift, so shifts reuse your 
 git clone https://github.com/Rohith18p/agentic_colab.git && cd agentic_colab
 export SWARM_END=2026-11-01T08:00:00-05:00     # required; the agent stops for good then
 
-# Smoke test: exactly one shift. Watch it on the dashboard.
+# Smoke test: exactly one shift, then it exits. Watch it on the dashboard.
 MAX_SHIFTS=1 swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmos-gpu
 
 # Real run, inside tmux so it survives SSH disconnects

@@ -26,7 +26,8 @@ Environment (all optional except what the Runner needs):
   AGENT_SKILLS         comma-separated machine capabilities, e.g. "cosmos-gpu,isaac-sim"
   SHIFT_BUDGET_USD     spend cap per shift, passed as --max-budget-usd (default 1.50)
   TOTAL_BUDGET_USD     stop starting shifts after this much spend (default 40)
-  MAX_SHIFTS           stop after this many shifts (default: no limit)
+  MAX_SHIFTS           run this many shifts, then exit the runner (counted per start, so
+                       MAX_SHIFTS=1 is a one-shift smoke test; default: no limit)
   SHIFT_TIMEOUT_SECONDS  stop a shift that runs longer than this (default 2700)
   PERMISSION_MODE      Claude Code --permission-mode (default "default")
   ALLOWED_TOOLS        Claude Code --allowedTools (default: shell, files, web, board); every attached
@@ -307,6 +308,8 @@ class ClaudeCodeAgent(Agent):
         self._announced_stop = False
         self._env_file_mtime: float | None = None
         self._loaded_head: str | None = None  # commit this process's code came from (AUTO_UPDATE)
+        # Carried across self-update restarts (os.execv), which continue the same run.
+        self._shifts_this_run = int(os.environ.pop("RUNNER_SHIFTS_THIS_RUN", "") or 0)
 
     @classmethod
     def from_env(cls) -> ClaudeCodeAgent:
@@ -420,15 +423,20 @@ class ClaudeCodeAgent(Agent):
         return self.end is not None and datetime.now(timezone.utc) >= self.end
 
     def _out_of_budget(self) -> str | None:
-        if self.max_shifts is not None and self.state.shifts >= self.max_shifts:
-            return f"reached MAX_SHIFTS={self.max_shifts}"
         if self.total_budget_usd is not None and self.state.spent_usd >= self.total_budget_usd:
             return f"spent ${self.state.spent_usd:.2f} of TOTAL_BUDGET_USD=${self.total_budget_usd:.2f}"
         return None
 
     async def step(self, ctx: AgentContext) -> bool:
+        if self.max_shifts is not None and self._shifts_this_run >= self.max_shifts:
+            log.info("%s: ran MAX_SHIFTS=%d; exiting", ctx.agent_name, self.max_shifts)
+            await ctx.post_message(f"{ctx.agent_name} ran its {self.max_shifts} shift(s) (MAX_SHIFTS) and has "
+                                   f"stopped. Its owner can start it again; it keeps its notebook.")
+            self.done = True
+            return False
         if self.auto_update and await anyio.to_thread.run_sync(self_update, self.repo_root, self._loaded_head):
             log.info("%s: runner code changed; restarting the runner", ctx.agent_name)
+            os.environ["RUNNER_SHIFTS_THIS_RUN"] = str(self._shifts_this_run)
             os.execv(sys.executable, [sys.executable, "-m", "runner"])
         self._reload_settings(ctx.agent_name)
         if self._past_end():
@@ -464,6 +472,7 @@ class ClaudeCodeAgent(Agent):
             ctx.inbox_cursor = old_cursor
         self.state.inbox_cursor = ctx.inbox_cursor
         self.state.shifts = number
+        self._shifts_this_run += 1
         self.state.spent_usd += result.cost_usd
         self.state.last_stop = result.stopped
         if result.limit:

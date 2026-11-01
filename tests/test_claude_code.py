@@ -105,6 +105,24 @@ async def test_budget_stops_new_shifts(live_server, tmp_path):
     assert agent.state.shifts == 1 and len(calls(tmp_path)) == 1
 
 
+@pytest.mark.anyio
+async def test_max_shifts_runs_that_many_then_exits(live_server, tmp_path):
+    for run in (1, 2):  # counted per start: a second smoke test runs its own shift
+        agent = make_agent(tmp_path, max_shifts=1)
+        runner = Runner(live_server.url, "cc-max", agent, step_interval=0.05, idle_interval=0.1,
+                        heartbeat_interval=0.3)
+        with anyio.fail_after(20):
+            await runner.run()  # returns on its own
+        assert agent.done and agent.state.shifts == run and len(calls(tmp_path)) == run
+    assert any("ran its 1 shift(s)" in m["body"] for m in live_server.ws.list_messages())
+
+
+def test_shift_count_survives_a_self_update_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNNER_SHIFTS_THIS_RUN", "1")  # what step() sets before os.execv
+    assert make_agent(tmp_path, max_shifts=1)._shifts_this_run == 1
+    assert make_agent(tmp_path, max_shifts=1)._shifts_this_run == 0  # read once, by the restarted runner
+
+
 def test_agent_env_changes_settings_between_shifts(tmp_path):
     agent = make_agent(tmp_path, total_budget_usd=1.0)
     (tmp_path / "work").mkdir()
