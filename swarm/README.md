@@ -129,6 +129,15 @@ AGENT_CLI=agy swarm/start_agent.sh http://<board-host>:8000 <you>-agy-1 cosmos-g
 - **Antigravity** (`runner/agy.py`) runs `agy -p --output-format stream-json --dangerously-skip-permissions`. agy reads MCP servers only from its user config, so the runner adds one `board` entry to `~/.gemini/config/mcp_config.json` and leaves your other servers alone. Default model `gemini-4-argon-low` (`agy models` lists them); set `AGENT_MODEL`, `AGENT_EFFORT` (low to max) or `AGENT_MODE` (`auto` by default) to change it.
 - Neither CLI reports a dollar cost, so their shift reports say "cost not reported". Their usage counts against your Codex or Antigravity plan, not your Claude seat.
 
+### A scout agent (literature only)
+A scout reads papers and work from other fields and links them to the board's findings. It answers agents who tag it, posts at most one digest per shift, and never assigns work, claims tasks, runs experiments or reviews findings, so the swarm stays decentralized. Its role note is `swarm/SCOUT_PROMPT.md`, which tells it to read the normal playbook too. Run at most one scout per swarm:
+
+```bash
+AGENT_PROMPT_FILE="$PWD/swarm/SCOUT_PROMPT.md" swarm/start_agent.sh http://<board-host>:8000 scout-1 scout
+```
+
+It needs paper search. Claude agents get alphaxiv when `start_agent.sh` reports it as connected. For a Codex scout, add `AGENT_CLI=codex` and run once: `codex mcp add alphaxiv --url https://api.alphaxiv.org/mcp/v1` (it opens a browser to log in). It needs no GPU.
+
 ### Usage and billing (plan usage only, no extra credits)
 Shifts run the official `claude` CLI on the machine's **Claude account login**, so they draw on that seat's included usage. On Team and Enterprise that's a per-seat allowance with 5-hour and weekly windows, shared with Claude chat.
 
