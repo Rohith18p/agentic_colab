@@ -13,7 +13,9 @@ client can die, and nothing is lost: run `fetch` in a later shift.
 jobs.jsonl uses the same format as tools/cosmos_local/client.py: one JSON object per line with
 "name" and "prompt" (text, or a path to a .json caption), and optional "image" (path to the input
 frame), width, height, num_frames, fps, steps, guidance, flow_shift, seed, negative_prompt,
-extra_params. `fetch` writes <name>.mp4 and <name>.json (the sidecar: every setting, the endpoint
+extra_params, and "files" (a list of paths, up to 8, sent to the endpoint as internals_files and read there by
+basename: e.g. "files": ["proxy.mp4"] with "extra_params": {"latent": {"ref": "proxy.mp4", "init": "noised",
+"start_step": 12}}, or "files": ["z.npz"] with {"latent": {"start_file": "z.npz"}}). `fetch` writes <name>.mp4 and <name>.json (the sidecar: every setting, the endpoint
 that ran it, timings) and skips clips already downloaded.
 
 A line with "kind": "probe_loss" runs the denoising-loss probe instead of a clip: it needs "video" (path to
@@ -21,7 +23,9 @@ an mp4) and optional "image" and "probe" (the settings object of POST /v1/probe/
 `fetch` writes only <name>.json for it (the probe's result). Clip jobs that capture activations (extra_params.internals)
 list the server's artifact ids in the sidecar's "artifact_ids". The queue also relays the endpoint's own sidecar (what
 actually ran: sigmas, executed hooks, noise, server revision) and the artifacts; `fetch` writes them as
-<name>.server.json and <name>.<artifact_id>.npz.
+<name>.server.json and <name>.<artifact_id>.npz. Each clip is also checked automatically (scripts/cosmos_qc.py) and
+`fetch` writes <name>.qc.json: "flicker" (std over frames of the mean grey level / its mean; real footage ~0.005,
+the E6 band-ringing artifact 0.5) and "flags" (e.g. "flicker" when > 0.08). Look at a flagged clip before measuring it.
 
 The queue URL comes from --url or COSMOS_QUEUE_URL. Standard library only.
 """
@@ -82,6 +86,9 @@ def submit(a) -> None:
         if j.get("image"):
             body["image_b64"] = base64.b64encode(Path(j["image"]).read_bytes()).decode()
             body["image_name"] = os.path.basename(j["image"])
+        if j.get("files"):  # uploads the server reads by name: extra_params.latent.ref / start_file, x0_inject masks
+            body["files"] = [{"name": os.path.basename(f), "b64": base64.b64encode(Path(f).read_bytes()).decode()}
+                             for f in j["files"]]
         r = call(f"{a.url}/jobs", "POST", body)
         print(f"{r['id']}  {j['name']}")
         n += 1
@@ -117,6 +124,12 @@ def fetch(a) -> None:
             continue
         mp4 = out / f"{j['name']}.mp4"
         probe = j.get("kind") == "probe_loss"  # no clip: the result is the JSON
+        if j.get("qc"):  # automatic clip QC (scripts/cosmos_qc.py): flicker index etc.; may arrive after the clip
+            qc = out / f"{j['name']}.qc.json"
+            if not qc.exists():
+                qc.write_text(json.dumps(j["qc"], indent=1))
+                if j["qc"].get("flags"):
+                    print(f"QC {j['name']}: {', '.join(j['qc']['flags'])} (see {qc.name})", file=sys.stderr)
         if (out / f"{j['name']}.json" if probe else mp4).exists():
             continue
         (out / f"{j['name']}.json").write_text(json.dumps(j.get("sidecar", {}), indent=1))

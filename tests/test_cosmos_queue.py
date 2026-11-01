@@ -197,3 +197,47 @@ def test_option_jobs_only_go_to_endpoints_that_support_them(tmp_path):
     assert got["name"] == "plain"
     assert q.next_job("old", set()) is None  # the noise job is not given to the old server
     assert q.next_job("new", {"noise", "internals"})["name"] == "noisy"
+
+
+def test_clip_job_files_are_forwarded_as_internals_files(tmp_path):
+    # latent.ref / latent.start_file need uploads; the queue must carry them to the endpoint (one field per file)
+    seen = []
+    ep, u = fake_endpoint(seen)
+    q, stop, srv, url = start_queue(tmp_path / "queue", {"a": u})
+    (tmp_path / "proxy.mp4").write_bytes(b"PROXYMP4")
+    (tmp_path / "z.npz").write_bytes(b"NPZDATA")
+    jobs = tmp_path / "jobs.jsonl"
+    jobs.write_text(json.dumps({"name": "sp_s1", "prompt": "a pendulum", "files": ["proxy.mp4", "z.npz"]}) + "\n")
+    # (a real job adds extra_params.latent, which routes it only to endpoints whose /health lists 'latent')
+    cli(url, "submit", str(jobs), "--owner", "carol-1", cwd=tmp_path)
+    wait(lambda: all(j["status"] == "done" for j in q.jobs.values()))
+    body = seen[0]
+    assert body.count(b'name="internals_files"') == 2
+    assert b'filename="proxy.mp4"' in body and b"PROXYMP4" in body and b'filename="z.npz"' in body and b"NPZDATA" in body
+    (job,) = q.jobs.values()
+    assert job["files"] == ["proxy.mp4", "z.npz"]
+    with pytest.raises(ValueError):
+        q.submit({"owner": "carol-1", "name": "bad", "prompt": "x", "files": [{"name": "bad name!.npz", "b64": "QQ=="}]})
+    ok = q.submit({"owner": "carol-1", "name": "path", "prompt": "x", "files": [{"name": "../up.npz", "b64": "QQ=="}]})
+    assert ok["files"] == ["up.npz"] and (tmp_path / "queue" / ok["id"] / "files" / "up.npz").exists()  # basename only
+    with pytest.raises(ValueError):
+        q.submit({"owner": "carol-1", "name": "dup", "prompt": "x",
+                  "files": [{"name": "a.npz", "b64": "QQ=="}, {"name": "a.npz", "b64": "QQ=="}]})
+    stop.set(); srv.shutdown(); ep.shutdown()
+
+
+def test_qc_json_is_attached_to_the_job_and_fetched(tmp_path):
+    seen = []
+    ep, u = fake_endpoint(seen)
+    q, stop, srv, url = start_queue(tmp_path / "queue", {"a": u})
+    jobs = tmp_path / "jobs.jsonl"
+    jobs.write_text(json.dumps({"name": "c1", "prompt": "a pendulum"}) + "\n")
+    cli(url, "submit", str(jobs), "--owner", "dan-1", cwd=tmp_path)
+    wait(lambda: all(j["status"] == "done" for j in q.jobs.values()))
+    (job,) = q.jobs.values()
+    (tmp_path / "queue" / job["id"] / "qc.json").write_text(json.dumps({"flicker": 0.5, "flags": ["flicker"]}))
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "cosmos_queue.py"), "--url", url, "fetch", "--owner", "dan-1",
+                        "--out", "clips"], capture_output=True, text=True, cwd=tmp_path, timeout=60)
+    assert r.returncode == 0 and "QC c1: flicker" in r.stderr
+    assert json.loads((tmp_path / "clips" / "c1.qc.json").read_text())["flicker"] == 0.5
+    stop.set(); srv.shutdown(); ep.shutdown()

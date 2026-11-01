@@ -46,7 +46,8 @@ DEFAULTS = dict(width=832, height=480, num_frames=189, fps=24, steps=35, guidanc
 KINDS = ("clip", "probe_loss")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
 MAX_PENDING_PER_OWNER = 60
-MAX_BODY = 25 * 1024 * 1024
+MAX_BODY = 64 * 1024 * 1024
+MAX_FILES = 8
 LOCK = threading.Lock()
 
 
@@ -88,6 +89,13 @@ class Queue:
             raise ValueError(f"kind must be one of {KINDS}")
         if kind == "probe_loss" and not body.get("video_b64"):
             raise ValueError("a probe_loss job needs video_b64 (and video_name)")
+        files = body.get("files") or []
+        if not isinstance(files, list) or len(files) > MAX_FILES:
+            raise ValueError(f"files must be a list of at most {MAX_FILES} {{name, b64}} objects")
+        fnames = [os.path.basename(str((f or {}).get("name") or "")) for f in files]
+        if any(not NAME_RE.match(n) for n in fnames) or len(set(fnames)) != len(fnames) or \
+                any(not (f or {}).get("b64") for f in files):
+            raise ValueError("each file needs a unique name (letters, digits, '_', '.', '-') and b64 content")
         unknown = [e for e in body.get("endpoints") or [] if e not in self.endpoints]
         if unknown:
             raise ValueError(f"unknown endpoints {unknown}; known: {sorted(self.endpoints)}")
@@ -113,6 +121,11 @@ class Queue:
                 video_name = os.path.basename(str(body.get("video_name") or "input.mp4")) or "input.mp4"
                 (d / video_name).write_bytes(base64.b64decode(body["video_b64"]))
                 job["video"] = video_name
+            if files:  # forwarded to the endpoint as internals_files (latent.ref / latent.start_file / x0_inject masks)
+                (d / "files").mkdir()
+                for n, f in zip(fnames, files):
+                    (d / "files" / n).write_bytes(base64.b64decode(f["b64"]))
+                job["files"] = fnames
             self._save(job)
             self.jobs[jid] = job
         return job
@@ -159,6 +172,12 @@ class Queue:
         side = self.root / job["id"] / "out.json"
         if job["status"] == "done" and side.exists():
             out["sidecar"] = json.loads(side.read_text())
+        qc = self.root / job["id"] / "qc.json"  # written by scripts/cosmos_qc.py (flicker etc.), when it runs
+        if qc.exists():
+            try:
+                out["qc"] = json.loads(qc.read_text())
+            except ValueError:
+                pass
         return out
 
 
@@ -179,14 +198,17 @@ def health(url: str) -> dict | None:
         return None
 
 
-def multipart(fields: dict[str, str], file: tuple[str, bytes] | None, files: dict | None = None) -> tuple[bytes, str]:
-    """`file` is the clip job's input image; `files` maps extra field names to (filename, bytes)."""
+def multipart(fields: dict[str, str], file: tuple[str, bytes] | None, files=None) -> tuple[bytes, str]:
+    """`file` is the clip job's input image; `files` maps extra field names to (filename, bytes), or is a list of
+    (field, (filename, bytes)) pairs when a field repeats (several internals_files)."""
     boundary = uuid.uuid4().hex
     parts = []
     for k, v in fields.items():
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
-    files = {"input_reference": file, **(files or {})} if file else dict(files or {})
-    for field, (name, data) in files.items():
+    pairs = list(files.items()) if isinstance(files, dict) else list(files or [])
+    if file:
+        pairs = [("input_reference", file)] + pairs
+    for field, (name, data) in pairs:
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{name}"\r\n'
                      f'Content-Type: application/octet-stream\r\n\r\n'.encode() + data + b"\r\n")
     parts.append(f"--{boundary}--\r\n".encode())
@@ -231,7 +253,8 @@ def run_job(q: Queue, name: str, url: str, job: dict) -> None:
         fields["negative_prompt"] = p["negative_prompt"]
     d = q.root / job["id"]
     file = (job["image"], (d / job["image"]).read_bytes()) if job["image"] else None
-    body, ctype = multipart(fields, file)
+    extra = [("internals_files", (n, (d / "files" / n).read_bytes())) for n in job.get("files") or []]
+    body, ctype = multipart(fields, file, extra)
     t = time.time()
     req = urllib.request.Request(f"{url.rstrip('/')}/v1/videos/sync", data=body, method="POST",
                                  headers={"Content-Type": ctype})
