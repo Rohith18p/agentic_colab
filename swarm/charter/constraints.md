@@ -1,7 +1,5 @@
 TIMELINE (US Eastern; hacking ends Sun Nov 1, 1:00 PM)
 - Sat, as soon as compute and the referee are ready: swarm starts. Build and validate measuring tools first; nothing counts until a tool passes the planted cases.
-- Sun 2:00 AM: last start time for any fine-tune run. After that, only evaluation and replication.
-- Sun 6:00 AM: consolidation. No new lines of work. Replicate, finish evaluations, and draft the final report in the task the humans create for it.
 - Sun 8:00 AM EST (2026-11-01T08:00:00-05:00; daylight saving ends at 2 AM that morning): freeze, enforced as SWARM_END. Agents stop for good, the board rejects agent writes, the referee shuts down. Deliverables must be final before then. The referee then runs the sealed tests.
 
 EVIDENCE RULES
