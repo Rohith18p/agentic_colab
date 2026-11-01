@@ -15,7 +15,12 @@ manifest.json (public; served at GET /planted):
     {"clips": [{"clip_id": "drop-017", "path": "<store>/planted/drop-017.mp4", "fps": 24,
                 "params": ["g"], "notes": "ball diameter 0.10 m"}]}
 answers.json (secret; keep it off the shared store):
-    {"drop-017": {"g": 6.0}}
+    {"drop-017": {"g": 6.0}, "rest-03": {"end_state": "REST"}}
+
+A string answer is a label (e.g. end_state REST/MOVING). Labels get no per-clip feedback, which would
+give the answers away; the result has only totals (accuracy, Cohen's kappa, confusion counts), and
+only when the agent labels at least --min-estimates of those clips (or all of them). UNCLEAR is
+allowed and counts as scored but wrong.
 
 POST /score body:
     {"agent": "alice-1", "method": "falltrack v2 @ 1a2b3c", "estimates": {"drop-017": {"g": 5.8}}}
@@ -37,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 BANDS = ((0.05, "<5%"), (0.10, "5-10%"), (0.25, "10-25%"))
+ABSTAIN = "UNCLEAR"
 
 
 def band(rel_err: float) -> str:
@@ -87,6 +93,7 @@ class Referee:
         per_clip: dict[str, dict[str, str]] = {}
         scored = passed = 0
         ignored = []
+        labels: dict[str, list[tuple[str, str]]] = defaultdict(list)  # param -> [(truth, answer)]
         for clip_id, params in estimates.items():
             truth = self.answers.get(clip_id)
             if truth is None or not isinstance(params, dict):
@@ -94,6 +101,9 @@ class Referee:
                 continue
             for name, value in params.items():
                 if name not in truth:
+                    continue
+                if isinstance(truth[name], str):
+                    labels[name].append((truth[name].upper(), str(value).strip().upper() or ABSTAIN))
                     continue
                 try:
                     est = float(value)
@@ -104,9 +114,21 @@ class Referee:
                 per_clip.setdefault(clip_id, {})[name] = band(rel)
                 scored += 1
                 passed += rel <= self.tolerance
+        label_summary = {}
+        for name, pairs in labels.items():
+            needed = min(self.min_estimates, sum(1 for t in self.answers.values() if name in t))
+            if len(pairs) < needed:
+                label_summary[name] = {"labelled": len(pairs),
+                                       "message": f"Label at least {needed} of the {name} clips; nothing was scored."}
+                continue
+            right = sum(t == a for t, a in pairs)
+            scored += len(pairs)
+            passed += right
+            label_summary[name] = label_stats(pairs)
         rate = passed / scored if scored else 0.0
         verdict = "pass" if scored >= min(self.min_estimates, self._total_params()) and rate >= self.pass_rate else "fail"
         return {
+            **({"labels": label_summary} if label_summary else {}),
             "agent": agent,
             "method": method,
             "estimates_scored": scored,
@@ -117,7 +139,8 @@ class Referee:
             "per_clip_error_band": per_clip,
             "ignored_clip_ids": ignored,
             "rule": f"pass = at least {self.min_estimates} estimates (or all) scored and "
-                    f">= {self.pass_rate:.0%} within {self.tolerance:.0%} relative error",
+                    f">= {self.pass_rate:.0%} within {self.tolerance:.0%} relative error "
+                    f"(a label counts if it matches; {ABSTAIN} counts as wrong)",
         }
 
     def _total_params(self) -> int:
@@ -134,10 +157,37 @@ class Referee:
                 f"{result['within_tolerance']}/{result['estimates_scored']} estimates within "
                 f"{result['tolerance']:.0%} -> {result['verdict'].upper()}."
             )
+            for name, st in result.get("labels", {}).items():
+                if "correct" in st:
+                    body += (f" {name}: {st['correct']}/{st['labelled']} correct, {st['abstained']} {ABSTAIN}, "
+                             f"kappa {st['cohen_kappa']}.")
             try:
                 post(f"{self.board_url}/api/messages", {"body": body, "channel": "findings", "type": "review"})
             except Exception as e:  # the agent still gets its answer
                 print(f"could not post to board: {e!r}")
+
+
+def label_stats(pairs: list[tuple[str, str]]) -> dict[str, Any]:
+    """Totals only: accuracy over all labels (UNCLEAR = wrong), accuracy and Cohen's kappa over the
+    clips that got a real label, and confusion counts as {truth: {answer: count}}."""
+    n = len(pairs)
+    right = sum(t == a for t, a in pairs)
+    decided = [(t, a) for t, a in pairs if a != ABSTAIN]
+    confusion: dict[str, dict[str, int]] = {}
+    for t, a in pairs:
+        row = confusion.setdefault(t, {})
+        row[a] = row.get(a, 0) + 1
+    kappa = None
+    if decided:
+        m = len(decided)
+        po = sum(t == a for t, a in decided) / m
+        cats = {t for t, _ in decided} | {a for _, a in decided}
+        pe = sum((sum(t == c for t, _ in decided) / m) * (sum(a == c for _, a in decided) / m) for c in cats)
+        kappa = round((po - pe) / (1 - pe), 3) if pe < 1 else None
+    return {"labelled": n, "correct": right, "abstained": n - len(decided),
+            "accuracy": round(right / n, 3) if n else 0.0,
+            "accuracy_when_labelled": round(sum(t == a for t, a in decided) / len(decided), 3) if decided else None,
+            "cohen_kappa": kappa, "confusion": confusion}
 
 
 def post(url: str, body: dict[str, Any]) -> None:

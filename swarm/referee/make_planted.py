@@ -153,16 +153,152 @@ def slide(rng: np.random.Generator, g: float, angle_deg: float, mu: float, secon
     return finish(frames, rng), a
 
 
+# --- REST / MOVING at the end of the clip --------------------------------------------------------
+# Label rule, stated in every clip's notes: REST if the ball does not move at all during the last
+# 1.0 s; MOVING if the ball's centre travels at least one ball diameter during the last 0.5 s.
+# Nothing in between is generated, so no clip is borderline.
+REST_PPM, REST_R_M = 220.0, 0.05
+REST_STILL_S, REST_MOVE_S = 1.0, 0.5
+REST_KINDS = {"REST": ("settle_bounce", "settle_roll", "static"), "MOVING": ("bouncing", "rolling", "late_start")}
+
+
+def ball_path(g: float, e: float, x0: float, h0: float, vx0: float, decel: float, n: int,
+              start_s: float = 0.0) -> np.ndarray:
+    """Per-frame (x, height of the ball's bottom) in metres. A ball dropped from h0 with horizontal
+    speed vx0 bounces with restitution e, then rolls with constant deceleration until it stops.
+    With start_s > 0 it sits still until then (as if nudged)."""
+    x, y, vx, vy, dt = x0, h0, 0.0 if start_s else vx0, 0.0, 1e-4
+    out, t, k = [], 0.0, 0
+    while len(out) < n:
+        if t >= k / FPS - 1e-12:
+            out.append((x, y))
+            k += 1
+        if t < start_s:
+            t += dt
+            continue
+        if start_s and vx == 0.0 and t - dt < start_s:
+            vx = vx0
+        if y > 0 or vy > 0:
+            vy -= g * dt
+            y += vy * dt
+            if y < 0:
+                y = 0.0
+                vy = -vy * e if abs(vy) > 0.15 else 0.0
+        if y == 0 and vy == 0 and vx != 0:  # rolling
+            s = np.sign(vx)
+            vx = s * max(0.0, abs(vx) - decel * dt)
+        x += vx * dt
+        t += dt
+    return np.array(out)
+
+
+def rest_label(path_px: np.ndarray, r_px: float) -> str | None:
+    """REST, MOVING, or None (borderline, or the ball leaves the frame: resample)."""
+    if (path_px[:, 0] < r_px + 4).any() or (path_px[:, 0] > W - r_px - 4).any() or (path_px[:, 1] < r_px + 4).any():
+        return None
+    still = path_px[-int(REST_STILL_S * FPS) - 1:]
+    if np.abs(still - still[-1]).max() < 1e-6:
+        return "REST"
+    move = path_px[-int(REST_MOVE_S * FPS) - 1:]
+    if np.linalg.norm(np.diff(move, axis=0), axis=1).sum() >= 2 * r_px:
+        return "MOVING"
+    return None
+
+
+def rest_clip(rng: np.random.Generator, kind: str, distractor: str, n: int) -> tuple[list[np.ndarray], str]:
+    floor_y = H - 50
+    r_px = REST_R_M * REST_PPM
+    for _ in range(2000):
+        g = 9.81
+        x0 = rng.uniform(1.0, 2.8)
+        if kind == "static":
+            m = ball_path(g, 0.5, x0, 0.0, 0.0, 0.0, n)
+        elif kind == "settle_bounce":
+            m = ball_path(g, rng.uniform(0.25, 0.55), x0, rng.uniform(0.6, 1.6), rng.uniform(-0.15, 0.15), 2.0, n)
+        elif kind == "settle_roll":
+            m = ball_path(g, rng.uniform(0.25, 0.5), x0, rng.uniform(0.3, 1.2), rng.choice([-1, 1]) * rng.uniform(0.3, 0.9),
+                          rng.uniform(0.4, 1.5), n)
+        elif kind == "bouncing":
+            m = ball_path(g, rng.uniform(0.8, 0.93), x0, rng.uniform(1.0, 1.7), rng.uniform(-0.05, 0.05), 0.5, n)
+        elif kind == "rolling":
+            m = ball_path(g, 0.4, x0, rng.uniform(0.0, 0.3), rng.choice([-1, 1]) * rng.uniform(0.3, 0.8),
+                          rng.uniform(0.0, 0.08), n)
+        else:  # late_start: still for most of the clip, then rolls away during the last ~1 s
+            m = ball_path(g, 0.4, x0, 0.0, rng.choice([-1, 1]) * rng.uniform(0.4, 0.9), rng.uniform(0.0, 0.3), n,
+                          start_s=n / FPS - rng.uniform(0.7, 1.4))
+        px = np.stack([m[:, 0] * REST_PPM, floor_y - (m[:, 1] + REST_R_M) * REST_PPM], axis=1)
+        label = rest_label(px, r_px)
+        if label is not None and kind in REST_KINDS[label]:
+            break
+    else:
+        raise RuntimeError(f"could not sample a {kind} clip")
+    bg = background(rng, floor_y)
+    color = tuple(int(v) for v in rng.uniform(30, 200, 3))
+    box_y, box_x0, box_v = rng.uniform(60, 200), rng.uniform(0, W - 300), rng.uniform(40, 90) * rng.choice([-1, 1])
+    phase = rng.uniform(0, 2 * math.pi)
+    frames = []
+    for i, (x, y) in enumerate(px):
+        img = bg.copy()
+        if distractor == "box":  # something else moves all clip long, so whole-frame stillness is not REST
+            bx = (box_x0 + box_v * i / FPS) % (W - 60)
+            cv2.rectangle(img, (int(bx), int(box_y)), (int(bx) + 60, int(box_y) + 40), (60, 90, 150), -1)
+        ball(img, x, y, r_px, color)
+        if distractor == "flicker":  # lighting changes, the ball doesn't
+            img = np.clip(img.astype(np.float32) * (1 + 0.07 * math.sin(2 * math.pi * 1.3 * i / FPS + phase)),
+                          0, 255).astype(np.uint8)
+        frames.append(img)
+    return finish(frames, rng), label
+
+
+def rest_set(rng: np.random.Generator, out: Path, per_kind: int) -> tuple[list[dict], dict]:
+    jobs = [(kind, ("none", "box", "flicker")[j % 3]) for kinds in REST_KINDS.values() for kind in kinds
+            for j in range(per_kind)]
+    order = rng.permutation(len(jobs))
+    clips, answers = [], {}
+    for k, (kind, distractor) in enumerate(jobs):
+        clip_id = f"rest-{order[k]:02d}"
+        n = int(rng.choice([93, 121, 189]))
+        frames, label = rest_clip(rng, kind, distractor, n)
+        path = out / f"{clip_id}.mp4"
+        write_mp4(path, frames)
+        clips.append({"clip_id": clip_id, "path": str(path), "fps": FPS, "size": f"{W}x{H}", "frames": n,
+                      "params": ["end_state"], "labels": {"end_state": ["REST", "MOVING"]},
+                      "notes": "One ball on a floor; other things in the scene may move or flicker. end_state is REST "
+                               f"if the ball does not move at all during the last {REST_STILL_S:g} s, MOVING if its "
+                               f"centre travels at least one ball diameter during the last {REST_MOVE_S:g} s (no clip is "
+                               "in between). You may answer UNCLEAR; it counts as scored but not correct. Ball "
+                               "diameter 0.10 m. Static camera."})
+        answers[clip_id] = {"end_state": label}
+    return clips, answers
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--store", required=True, help="shared clip store; clips go to <store>/planted/")
     p.add_argument("--secret", required=True, help="referee-only directory for answers.json")
     p.add_argument("--seed", type=int, default=20261031)
+    p.add_argument("--add-rest", type=int, metavar="N", default=0,
+                   help="only add N REST/MOVING clips per scene kind (6 kinds) to an existing planted set, "
+                        "keeping its clips and answers; pick a --seed nobody has seen")
     args = p.parse_args()
     rng = np.random.default_rng(args.seed)
     out = Path(args.store) / "planted"
     out.mkdir(parents=True, exist_ok=True)
     Path(args.secret).mkdir(parents=True, exist_ok=True)
+
+    if args.add_rest:
+        man_path, ans_path = out / "planted.json", Path(args.secret) / "answers.json"
+        manifest = json.loads(man_path.read_text()) if man_path.exists() else {"clips": []}
+        answers = json.loads(ans_path.read_text()) if ans_path.exists() else {}
+        keep = [c for c in manifest["clips"] if not c["clip_id"].startswith("rest-")]
+        answers = {k: v for k, v in answers.items() if not k.startswith("rest-")}
+        new_clips, new_answers = rest_set(rng, out, args.add_rest)
+        clips = sorted(keep + new_clips, key=lambda c: c["clip_id"])
+        man_path.write_text(json.dumps({**manifest, "clips": clips}, indent=2))
+        ans_path.write_text(json.dumps({**answers, **new_answers}, indent=2))
+        n_rest = sum(v["end_state"] == "REST" for v in new_answers.values())
+        print(f"added {len(new_clips)} REST/MOVING clips ({n_rest} REST) to {out}; {len(clips)} clips in total")
+        return
 
     clips, answers = [], {}
     order = rng.permutation(16)  # clip ids don't reveal generation order

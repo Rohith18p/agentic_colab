@@ -40,3 +40,21 @@ def test_rate_limit_per_agent():
     assert not ref.allow("a", now=1002)
     assert ref.allow("b", now=1002)
     assert ref.allow("a", now=1000 + 3601)
+
+
+def test_labels_score_totals_only_and_unclear_counts_wrong():
+    answers = {f"rest-{i:02d}": {"end_state": "REST" if i % 2 else "MOVING"} for i in range(12)}
+    answers["drop-0"] = {"g": 6.0}
+    ref = referee.Referee({"clips": []}, answers)
+    perfect = ref.score("a", "m", {c: dict(t) for c, t in answers.items() if c.startswith("rest-")})
+    assert perfect["verdict"] == "pass" and perfect["labels"]["end_state"]["cohen_kappa"] == 1.0
+    assert "rest-00" not in json.dumps(perfect)  # no per-clip feedback for labels
+
+    guesses = {c: {"end_state": "rest"} for c in answers if c.startswith("rest-")}
+    guesses["rest-00"] = {"end_state": "UNCLEAR"}
+    res = ref.score("a", "m", guesses)["labels"]["end_state"]
+    assert res["correct"] == 6 and res["abstained"] == 1 and res["accuracy"] == 0.5
+    assert res["confusion"] == {"MOVING": {"UNCLEAR": 1, "REST": 5}, "REST": {"REST": 6}}
+
+    probe = ref.score("a", "m", {"rest-00": {"end_state": "MOVING"}})
+    assert probe["verdict"] == "fail" and "correct" not in probe["labels"]["end_state"]
