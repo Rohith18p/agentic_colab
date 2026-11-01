@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import socket
 
 import anyio
@@ -11,6 +12,16 @@ from .agent import Agent, AgentContext
 from .client import ToolCallError, WorkspaceClient, WorkspaceUnreachable
 
 log = logging.getLogger("runner")
+
+
+def _host(machine: str) -> str:
+    """The hostname part of a board machine label such as "box · 1x RTX 4090" or "mac (Apple M4)"."""
+    return machine.split(" · ")[0].split(" (")[0].strip()
+
+
+def _slug(text: str) -> str:
+    """Letters, digits, '_', '.', '-' only (board name rules), at most 20 characters."""
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", text.split(".")[0]).strip("-")[:20].strip("-")
 
 
 class Runner:
@@ -38,6 +49,7 @@ class Runner:
         self.heartbeat_interval = heartbeat_interval
         # Observable state (handy for tests and logs).
         self.registered = False
+        self._name_checked = False
         self.paused = False
         self.steps = 0
         self._stop = anyio.Event()
@@ -57,7 +69,49 @@ class Runner:
             finally:
                 tg.cancel_scope.cancel()
 
+    async def _unique_name(self, client: WorkspaceClient) -> str:
+        """The launch name, or an alias if another person's agent on another machine already uses it.
+
+        The board merges agents that register under one name (one inbox, one set of claims), so
+        two people who both start "scout-1" would share an identity. Same owner or same host
+        means it's this agent restarting, and the name is kept.
+        """
+        try:
+            agents = (await client.call("list_agents")).get("agents") or []
+        except ToolCallError as e:
+            log.warning("couldn't list agents to check the name %s: %s", self.agent_name, e)
+            return self.agent_name
+        taken = {a["name"]: a for a in agents}
+        me_host, me_owner = _host(self.machine), self.owner_name
+
+        def clashes(name: str) -> bool:
+            other = taken.get(name)
+            if other is None:
+                return False
+            host, owner = _host(other.get("machine") or ""), other.get("owner_name") or ""
+            if not host or host == name or host == me_host:  # unknown or this machine
+                return False
+            return not (owner and me_owner and owner == me_owner)
+
+        if not clashes(self.agent_name):
+            return self.agent_name
+        suffixes = [s for s in (_slug(me_owner), _slug(me_host)) if s]
+        candidates = [f"{self.agent_name}-{s}" for s in suffixes]
+        candidates += [f"{candidates[-1] if candidates else self.agent_name}-{i}" for i in range(2, 10)]
+        for name in candidates:
+            name = name[:64]
+            if not clashes(name):
+                other = taken[self.agent_name]
+                log.warning("the name %s is already used by %s's agent on %s; registering as %s",
+                            self.agent_name, other.get("owner_name") or "someone",
+                            _host(other.get("machine") or ""), name)
+                return name
+        return self.agent_name
+
     async def _register(self, client: WorkspaceClient, ctx: AgentContext) -> None:
+        if not self._name_checked:
+            self._name_checked = True
+            self.agent_name = ctx.agent_name = await self._unique_name(client)
         info = await client.call(
             "register_agent",
             agent_name=self.agent_name,

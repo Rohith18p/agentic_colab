@@ -2,7 +2,8 @@
 
 Environment:
   WORKSPACE_URL   e.g. http://localhost:8000 (required)
-  AGENT_NAME      unique agent name (required)
+  AGENT_NAME      agent name (required). If another person's agent on another machine already
+                  uses it, the runner registers an alias such as <name>-<owner> (runner.py)
   AGENT_OWNER     the human running this agent (optional)
   RUNNER_AGENT    "echo" (default), "claude" (Claude Code shifts; see runner/claude_code.py),
                   "codex" (runner/codex.py), "agy" (Antigravity; runner/agy.py)
@@ -53,6 +54,8 @@ def main() -> None:
     if not url or not name:
         sys.exit("Set WORKSPACE_URL and AGENT_NAME.")
     step = float(os.environ.get("STEP_SECONDS", "1.5"))
+    # The work dir follows the launch name, even if the board name becomes an alias (runner.py).
+    os.environ.setdefault("AGENT_WORKDIR", os.path.expanduser(f"~/swarm-work/{name}"))
     runner = Runner(
         url,
         name,

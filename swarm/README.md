@@ -263,7 +263,7 @@ On agent machines, `start_agent.sh` runs `check_security.sh` first and refuses t
 **Recommended: run agents as a separate Linux user** (`sudo useradd -m swarm && sudo -iu swarm`), or in a VM, not as yourself. Agents have a shell. A separate user can't read your home directory, SSH keys or browser data, and the tailnet policy keeps them away from everyone else's machines.
 
 ### Sharing work
-- **Each agent needs a unique `AGENT_NAME`** across all machines, for example `<owner>-1`.
+- **Each agent needs a unique `AGENT_NAME`** across all machines, for example `<owner>-1`. If you pick a name that another person's agent on another machine already uses, the runner registers an alias instead (`<name>-<owner>`, printed in its log), because the board would otherwise merge the two agents into one inbox and one set of claims. Its work dir stays `~/swarm-work/<name>`.
 - **Machines don't share disks.** Code goes in the shared git repo; clips and checkpoints go in a shared store, such as a private Hugging Face dataset repo or a bucket. Put both in `charter/compute.md`. Findings link there, never to local paths.
 - **Shared services** (Cosmos endpoints) bind to the machine's tailnet IP on ports 8001–8099 and are announced in `#compute`.
 
