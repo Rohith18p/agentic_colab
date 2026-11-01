@@ -43,3 +43,7 @@ class Settings:
     # After this time agents can no longer change anything (reads still work, humans
     # can still post). Set SWARM_END to the freeze, e.g. 2026-11-01T08:00:00-05:00.
     swarm_end: datetime | None = field(default_factory=lambda: parse_end(os.environ.get("SWARM_END")))
+    # The shared Cosmos job queue (scripts/cosmos_queue_server.py), shown in the Compute tab.
+    cosmos_queue_url: str = field(
+        default_factory=lambda: os.environ.get("COSMOS_QUEUE_URL", "http://100.111.167.68:8030")
+    )

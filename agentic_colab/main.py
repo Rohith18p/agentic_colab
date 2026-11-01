@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import urllib.request
 import uuid
 from pathlib import Path
 from typing import Any
@@ -85,8 +86,29 @@ def build_api(ws: Workspace, boot_id: str) -> APIRouter:
         return {**await run(ws.snapshot), "boot_id": boot_id}
 
     @api.get("/messages")
-    async def messages(channel: str | None = None, task_id: int | None = None, after_id: int | None = None, limit: int = 100):
-        return await run(ws.list_messages, channel=channel, task_id=task_id, after_id=after_id, limit=limit)
+    async def messages(channel: str | None = None, task_id: int | None = None, after_id: int | None = None,
+                       before_id: int | None = None, limit: int = 100):
+        return await run(ws.list_messages, channel=channel, task_id=task_id, after_id=after_id,
+                         before_id=before_id, limit=limit)
+
+    @api.get("/messages/{message_id}")
+    async def get_message(message_id: int):
+        return await run(ws.get_message, message_id)
+
+    @api.get("/compute")
+    async def compute():
+        """The shared Cosmos job queue's /status, fetched server side. If the board's host can't
+        reach the queue, the dashboard tries the queue URL from the browser instead."""
+        url = ws.settings.cosmos_queue_url.rstrip("/")
+
+        def fetch():
+            with urllib.request.urlopen(f"{url}/status", timeout=3) as r:
+                return json.loads(r.read())
+
+        try:
+            return {"ok": True, "url": url, "status": await anyio.to_thread.run_sync(fetch)}
+        except Exception as e:  # unreachable, timed out or bad JSON: say so, the page falls back
+            return {"ok": False, "url": url, "error": str(e)[:200]}
 
     @api.post("/messages")
     async def post_message(m: MessageIn, request: Request):
@@ -234,7 +256,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        return templates.TemplateResponse(request, "index.html", {"charter_warning": CHARTER_WARNING})
+        # The newest static file's mtime, so a browser never runs an old app.js against new HTML.
+        version = int(max(f.stat().st_mtime for f in (HERE / "static").iterdir()))
+        return templates.TemplateResponse(request, "index.html", {"charter_warning": CHARTER_WARNING, "v": version})
 
     @app.get("/healthz")
     async def healthz():

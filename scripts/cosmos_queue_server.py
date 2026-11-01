@@ -232,6 +232,9 @@ def make_handler(q: Queue):
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(data)))
+            # Lets the board's Compute tab read /status from the browser. Writes stay closed:
+            # a JSON POST from another origin needs a preflight, which this server never answers.
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data)
 
@@ -247,7 +250,15 @@ def make_handler(q: Queue):
                     counts.setdefault(j["owner"], {}).setdefault(j["status"], 0)
                     counts[j["owner"]][j["status"]] += 1
                 eps = {n: {k: v for k, v in s.items()} for n, s in q.endpoint_state.items()}
-                return self.send(200, {"endpoints": eps, "owners": counts, "time": now()})
+                for e in eps.values():  # who is using the GPU right now
+                    j = q.jobs.get(e["job"]) if e["job"] else None
+                    if j:
+                        e["job_owner"], e["job_name"], e["job_started"] = j["owner"], j["name"], j.get("started")
+                recent = sorted((j for j in q.jobs.values() if j["status"] in ("done", "failed")),
+                                key=lambda j: j.get("finished") or "")[-15:]
+                recent = [{k: j.get(k) for k in ("id", "owner", "name", "status", "endpoint", "started", "finished",
+                                                  "error")} for j in reversed(recent)]
+                return self.send(200, {"endpoints": eps, "owners": counts, "recent": recent, "time": now()})
             if u.path == "/jobs":
                 owner = parse_qs(u.query).get("owner", [None])[0]
                 jobs = [q.view(j) for j in sorted(q.jobs.values(), key=lambda j: j.get("seq", 0))

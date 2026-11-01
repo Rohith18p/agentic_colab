@@ -4,22 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>agentic_colab</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%232f5fd0'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css?v={{ v }}">
 </head>
 <body>
 <header>
   <h1>agentic_colab</h1>
-  <span id="live" class="pill off" title="Live updates">offline</span>
+  <span id="live" class="pill off" title="Live updates">connecting</span>
   <span id="ends" class="muted" title="SWARM_END: agents can't change anything after this"></span>
   <span class="spacer"></span>
-  <span>You are <b id="me">?</b> <button id="change-name" class="link">change</button></span>
+  <span class="me">You are <b id="me">?</b> <button id="change-name" class="link">change</button></span>
 </header>
 <nav id="tabs" class="tabs">
   <button data-tab="overview">Overview <span id="nh-badge" class="count" title="Questions waiting for a human"></span></button>
-  <button data-tab="ask">Ask</button>
-  <button data-tab="activity">Activity</button>
+  <button data-tab="messages">Channels <span id="unread-badge" class="count soft" title="Unread messages"></span></button>
   <button data-tab="tasks">Tasks</button>
-  <button data-tab="messages">Messages</button>
+  <button data-tab="compute">Compute</button>
+  <button data-tab="activity">Activity</button>
+  <button data-tab="ask">Ask</button>
   <button data-tab="charter">Charter</button>
 </nav>
 
@@ -33,110 +35,191 @@
 </dialog>
 
 <main>
-  <section id="needs-human" class="panel" data-tab="overview">
-    <h2>Needs human <span id="nh-count" class="count"></span></h2>
-    <div id="nh-list"><p class="muted">No open questions.</p></div>
-  </section>
-
-  <section id="agents" class="panel" data-tab="overview">
-    <h2>Agents</h2>
-    <table>
-      <thead><tr><th>Name</th><th>Owner / machine</th><th>Status</th><th>Task</th><th>Approach</th><th>Last heartbeat</th><th></th></tr></thead>
-      <tbody id="agent-rows"><tr><td colspan="7" class="muted">No agents yet.</td></tr></tbody>
-    </table>
-  </section>
-
-  <section id="recent-findings" class="panel" data-tab="overview">
-    <h2>Recent findings and reviews <button class="link" data-channel="findings">open #findings</button></h2>
-    <div id="findings-list" class="feed"><p class="muted">No findings yet.</p></div>
-  </section>
-
-  <section id="ask" class="panel" data-tab="ask">
-    <h2>Ask the explainer</h2>
-    <p class="muted">Ask what the agents are doing and why, or say how you'd like to steer. The explainer drafts the
-      change (a steering line, a message to an agent, a task, a pause), applies it only after you reply yes, and
-      posts it as "&lt;you&gt; (via explainer)".</p>
-    <p id="ask-offline" class="warning" hidden></p>
-    <div id="ask-list" class="message-list tall"></div>
-    <form id="ask-form" class="stack">
-      <div id="ask-reply" class="muted" hidden></div>
-      <textarea name="body" rows="2" placeholder="e.g. Why did bob-1 drop the pendulum work?  (Ctrl+Enter to send)" required></textarea>
-      <button type="submit">Ask</button>
-    </form>
-  </section>
-
-  <section id="activity" class="panel" data-tab="activity">
-    <h2>Activity</h2>
-    <div class="row">
-      <span class="muted">One report per agent shift: the agent's own summary, cost and outcome. Newest first.</span>
-      <span class="spacer"></span>
-      <select id="activity-agent"><option value="">All agents</option></select>
+  <!-- Overview: what needs you, who is doing what, what was found -->
+  <section data-tab="overview" hidden>
+    <div id="stats" class="stats"></div>
+    <div id="needs-human" class="panel attention" hidden>
+      <h2>Needs a human <span id="nh-count" class="count"></span></h2>
+      <div id="nh-list"></div>
     </div>
-    <div id="activity-list" class="feed"></div>
+    <div class="overview-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Agents</h2>
+          <span class="spacer"></span>
+          <label class="check"><input type="checkbox" id="show-offline"> show offline <span id="offline-n" class="muted"></span></label>
+        </div>
+        <div class="table-wrap"><table class="agents">
+          <thead><tr><th>Agent</th><th>Status</th><th>Working on</th><th>Seen</th><th></th></tr></thead>
+          <tbody id="agent-rows"></tbody>
+        </table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Latest findings</h2>
+          <span class="spacer"></span>
+          <button class="link" data-channel="findings">all of #findings →</button>
+        </div>
+        <div id="findings-list"></div>
+      </div>
+    </div>
   </section>
 
-  <section id="tasks" class="panel" data-tab="tasks">
-    <h2>Task board</h2>
-    <details>
-      <summary>New task</summary>
-      <form id="task-form" class="stack">
-        <input name="title" placeholder="Title" required maxlength="300">
-        <textarea name="description" rows="2" placeholder="Description (optional; include [ask] to have EchoAgent ask a human first)"></textarea>
-        <input name="parent_id" type="number" min="1" placeholder="Parent task id (optional)">
-        <button type="submit">Create task</button>
-      </form>
-    </details>
-    <div id="board" class="board"></div>
-  </section>
-
-  <section id="messages" class="panel" data-tab="messages">
-    <h2>Message board</h2>
-    <div class="msg-layout">
-      <nav id="threads"></nav>
-      <div class="thread">
-        <div id="thread-header"></div>
-        <div id="message-list" class="message-list"></div>
-        <form id="message-form" class="stack">
+  <!-- Channels: threads grouped by reply, newest activity first -->
+  <section data-tab="messages" hidden>
+    <div class="split">
+      <nav id="channels" class="side"></nav>
+      <div class="panel main-col">
+        <div class="panel-head">
+          <h2 id="channel-title"># general</h2>
+          <span id="channel-desc" class="muted"></span>
+          <span class="spacer"></span>
+          <input id="channel-search" type="search" placeholder="Filter messages…">
+        </div>
+        <form id="message-form" class="composer">
           <div id="reply-indicator" class="muted" hidden></div>
+          <textarea name="body" rows="2" placeholder="Write to the channel… use @name to mention an agent (Ctrl+Enter to send)" required></textarea>
           <div class="row">
             <select name="type">
               <option value="human_input">human_input</option>
               <option value="decision">decision</option>
-              <option value="proposal">proposal</option>
               <option value="question">question</option>
+              <option value="proposal">proposal</option>
               <option value="status">status</option>
               <option value="finding">finding</option>
               <option value="review">review</option>
             </select>
-            <span class="muted">Use @name to mention an agent.</span>
+            <span class="spacer"></span>
+            <button type="submit" class="primary">Post</button>
           </div>
-          <textarea name="body" rows="2" placeholder="Write a message…" required></textarea>
-          <button type="submit">Post</button>
+        </form>
+        <div id="message-list" class="threads"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tasks: filterable list on the left, the selected task and its thread on the right -->
+  <section data-tab="tasks" hidden>
+    <div class="split wide-side">
+      <div class="panel side-panel">
+        <div class="panel-head">
+          <div id="task-filters" class="chips"></div>
+          <span class="spacer"></span>
+          <button id="new-task-btn">+ New</button>
+        </div>
+        <form id="task-form" class="stack" hidden>
+          <input name="title" placeholder="Title" required maxlength="300">
+          <textarea name="description" rows="3" placeholder="Description (optional)"></textarea>
+          <div class="row">
+            <input name="parent_id" type="number" min="1" placeholder="Parent task id (optional)" class="narrow">
+            <span class="spacer"></span>
+            <button type="button" id="task-cancel">Cancel</button>
+            <button type="submit" class="primary">Create</button>
+          </div>
+        </form>
+        <input id="task-search" type="search" placeholder="Search tasks…">
+        <div id="task-list" class="task-list"></div>
+      </div>
+      <div class="panel main-col">
+        <div id="task-detail"><p class="muted">Pick a task on the left.</p></div>
+        <div id="task-thread" class="threads chrono"></div>
+        <form id="task-message-form" class="composer" hidden>
+          <div id="task-reply-indicator" class="muted" hidden></div>
+          <textarea name="body" rows="2" placeholder="Write in this task's thread… (Ctrl+Enter to send)" required></textarea>
+          <div class="row"><span class="spacer"></span><button type="submit" class="primary">Post</button></div>
         </form>
       </div>
     </div>
   </section>
 
-  <section id="charter" class="panel" data-tab="charter">
-    <h2>Charter <span id="charter-version" class="muted"></span></h2>
-    <p class="warning">⚠ {{ charter_warning }}</p>
-    <div id="charter-view"></div>
-    <form id="charter-form" class="stack" hidden>
-      <label>Objective <textarea name="objective" rows="3"></textarea></label>
-      <label>Constraints <textarea name="constraints" rows="3"></textarea></label>
-      <label>Libraries <textarea name="libraries" rows="2"></textarea></label>
-      <label>Compute available <textarea name="compute" rows="2"></textarea></label>
-      <label>Notes <textarea name="notes" rows="3"></textarea></label>
-      <div class="row"><button type="submit">Save new version</button> <button type="button" id="charter-cancel">Cancel</button></div>
-    </form>
-    <div class="row">
-      <button id="charter-edit">Edit</button>
-      <button id="charter-history-btn">History</button>
+  <!-- Compute: the shared Cosmos queue and its endpoints -->
+  <section data-tab="compute" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Cosmos endpoints</h2>
+        <span class="spacer"></span>
+        <span id="compute-meta" class="muted"></span>
+      </div>
+      <p id="compute-error" class="warning" hidden></p>
+      <div id="endpoints" class="endpoints"></div>
     </div>
-    <div id="charter-history" hidden></div>
+    <div class="overview-grid">
+      <div class="panel">
+        <h2>Queue by owner</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Owner</th><th class="num">Pending</th><th class="num">Running</th><th class="num">Done</th><th class="num">Failed</th></tr></thead>
+          <tbody id="owner-rows"></tbody>
+        </table></div>
+        <p class="muted small">Agents submit with <code>scripts/cosmos_queue.py submit jobs.jsonl --owner &lt;name&gt;</code> and fetch in a later shift.</p>
+      </div>
+      <div class="panel">
+        <h2>Recently finished</h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Job</th><th>Owner</th><th>Endpoint</th><th class="num">Took</th><th>When</th></tr></thead>
+          <tbody id="recent-rows"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Compute in the charter</h2><span class="spacer"></span><button class="link" data-channel="compute">#compute channel →</button></div>
+      <div id="charter-compute" class="md"></div>
+    </div>
+  </section>
+
+  <!-- Activity: one report per agent shift -->
+  <section data-tab="activity" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Shift reports</h2>
+        <span class="muted">each agent's own summary when a shift ends · newest first</span>
+        <span class="spacer"></span>
+        <select id="activity-agent"><option value="">All agents</option></select>
+      </div>
+      <div id="activity-list"></div>
+    </div>
+  </section>
+
+  <!-- Ask the explainer -->
+  <section data-tab="ask" hidden>
+    <div class="panel">
+      <h2>Ask the explainer</h2>
+      <p class="muted">Ask what the agents are doing and why, or say how you'd like to steer. The explainer drafts the
+        change (a steering line, a message to an agent, a task, a pause), applies it only after you reply yes, and
+        posts it as "&lt;you&gt; (via explainer)".</p>
+      <p id="ask-offline" class="warning" hidden></p>
+      <div id="ask-list" class="chat"></div>
+      <form id="ask-form" class="composer">
+        <div id="ask-reply" class="muted" hidden></div>
+        <textarea name="body" rows="2" placeholder="e.g. Why did bob-1 drop the pendulum work?  (Ctrl+Enter to send)" required></textarea>
+        <div class="row"><span class="spacer"></span><button type="submit" class="primary">Ask</button></div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Charter -->
+  <section data-tab="charter" hidden>
+    <div class="panel charter">
+      <div class="panel-head">
+        <h2>Charter <span id="charter-version" class="muted"></span></h2>
+        <span class="spacer"></span>
+        <button id="charter-edit">Edit</button>
+        <button id="charter-history-btn">History</button>
+      </div>
+      <p class="warning">⚠ {{ charter_warning }}</p>
+      <div id="charter-view"></div>
+      <form id="charter-form" class="stack" hidden>
+        <label>Objective <textarea name="objective" rows="6"></textarea></label>
+        <label>Constraints <textarea name="constraints" rows="6"></textarea></label>
+        <label>Libraries <textarea name="libraries" rows="3"></textarea></label>
+        <label>Compute available <textarea name="compute" rows="4"></textarea></label>
+        <label>Notes <textarea name="notes" rows="10"></textarea></label>
+        <div class="row"><button type="submit" class="primary">Save new version</button> <button type="button" id="charter-cancel">Cancel</button></div>
+      </form>
+      <div id="charter-history" hidden></div>
+    </div>
   </section>
 </main>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ v }}"></script>
 </body>
 </html>

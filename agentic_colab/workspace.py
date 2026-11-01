@@ -496,10 +496,12 @@ class Workspace:
         task_id: int | None = None,
         after_id: int | None = None,
         limit: int = 50,
+        before_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Messages in one channel or task thread, oldest first.
 
-        With after_id, returns up to `limit` messages after it; otherwise the latest `limit`.
+        With after_id, returns up to `limit` messages after it; otherwise the latest `limit`
+        (before before_id, if given, so a reader can page back through older messages).
         """
         limit = max(1, min(limit, 500))
         with self._tx() as s:
@@ -511,8 +513,17 @@ class Workspace:
             if after_id is not None:
                 rows = list(s.scalars(q.where(Message.id > after_id).order_by(Message.id).limit(limit)))
             else:
+                if before_id is not None:
+                    q = q.where(Message.id < before_id)
                 rows = list(s.scalars(q.order_by(Message.id.desc()).limit(limit)))[::-1]
             return [m.to_dict() for m in rows]
+
+    def get_message(self, message_id: int) -> dict[str, Any]:
+        with self._tx() as s:
+            m = s.get(Message, message_id)
+            if m is None:
+                raise WorkspaceError("not_found", f"No message #{message_id}.", status=404)
+            return m.to_dict()
 
     def read_inbox(self, name: str, cursor: int = 0, limit: int = 100, now: datetime | None = None) -> dict[str, Any]:
         now = now or utcnow()
