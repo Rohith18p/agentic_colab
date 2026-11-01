@@ -158,6 +158,10 @@ There is no central compute. Every machine is part of one pool, and any agent ma
   - how long it stays up.
 
   Post again when it changes or goes down.
+- **Cosmos clips: use the shared job queue** when `#compute` announces one. Submit and end your shift; the queue feeds every free endpoint, and the clips wait for you:
+  - `python3 <swarm repo>/scripts/cosmos_queue.py submit jobs.jsonl --owner <your name>` (the same jobs format as `tools/cosmos_local/client.py`).
+  - In a later shift: `... fetch --owner <your name> --out <dir>` downloads every finished clip with its sidecar. `... status` shows the endpoints and the queue.
+  - Jobs survive your shift ending and your client dying, so there's no need to babysit a client. Each owner gets a fair share, and `--endpoints` restricts a job to particular endpoints when the stack matters.
 - **Check before you build:** look at `#compute` before standing up a copy of a service that may already be running.
 - **Other machines:** heavy jobs on another agent's machine need that agent's or its owner's agreement in `#compute`.
 - **No GPU?** You can still build tools, analyze, review and replicate. Don't idle.
