@@ -18,6 +18,8 @@ API (JSON):
   GET  /jobs?owner=X    list jobs (all owners if omitted)
   GET  /jobs/<id>       one job, with its sidecar once done
   GET  /jobs/<id>/mp4   the clip
+  A job with "kind": "probe_loss" (plus "video_b64" + "video_name", optional "image_b64", and "probe": {settings})
+  is posted to the endpoint's /v1/probe/loss instead; it has no clip, its out.json is the probe's JSON result.
   DELETE /jobs/<id>     cancel a pending job
   GET  /status          endpoints, queue length per owner
 """
@@ -41,6 +43,7 @@ from urllib.parse import parse_qs, urlparse
 
 DEFAULTS = dict(width=832, height=480, num_frames=189, fps=24, steps=35, guidance=6.0, flow_shift=10.0, seed=1,
                 negative_prompt=None, extra_params={})
+KINDS = ("clip", "probe_loss")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
 MAX_PENDING_PER_OWNER = 60
 MAX_BODY = 25 * 1024 * 1024
@@ -80,6 +83,11 @@ class Queue:
             raise ValueError("owner and name must be 1-96 characters: letters, digits, '_', '.', '-'")
         if not str(body.get("prompt", "")).strip():
             raise ValueError("prompt is required")
+        kind = body.get("kind", "clip")
+        if kind not in KINDS:
+            raise ValueError(f"kind must be one of {KINDS}")
+        if kind == "probe_loss" and not body.get("video_b64"):
+            raise ValueError("a probe_loss job needs video_b64 (and video_name)")
         unknown = [e for e in body.get("endpoints") or [] if e not in self.endpoints]
         if unknown:
             raise ValueError(f"unknown endpoints {unknown}; known: {sorted(self.endpoints)}")
@@ -90,15 +98,21 @@ class Queue:
             jid = time.strftime("%H%M%S", time.gmtime()) + "-" + secrets.token_hex(3)
             params = {k: body.get(k, v) for k, v in DEFAULTS.items()}
             seq = 1 + max((j.get("seq", 0) for j in self.jobs.values()), default=0)
-            job = dict(id=jid, seq=seq, owner=owner, name=name, prompt=body["prompt"], params=params,
+            if kind == "probe_loss":
+                params = {"probe": body.get("probe") or {}}
+            job = dict(id=jid, seq=seq, owner=owner, name=name, kind=kind, prompt=body["prompt"], params=params,
                        endpoints=body.get("endpoints") or None, status="pending", submitted=now(),
-                       started=None, finished=None, endpoint=None, attempts=0, error=None, image=None)
+                       started=None, finished=None, endpoint=None, attempts=0, error=None, image=None, video=None)
             d = self.root / jid
             d.mkdir()
             if body.get("image_b64"):
                 image_name = os.path.basename(str(body.get("image_name") or "input.png")) or "input.png"
                 (d / image_name).write_bytes(base64.b64decode(body["image_b64"]))
                 job["image"] = image_name
+            if kind == "probe_loss":
+                video_name = os.path.basename(str(body.get("video_name") or "input.mp4")) or "input.mp4"
+                (d / video_name).write_bytes(base64.b64decode(body["video_b64"]))
+                job["video"] = video_name
             self._save(job)
             self.jobs[jid] = job
         return job
@@ -153,20 +167,49 @@ def health(url: str) -> dict | None:
         return None
 
 
-def multipart(fields: dict[str, str], file: tuple[str, bytes] | None) -> tuple[bytes, str]:
+def multipart(fields: dict[str, str], file: tuple[str, bytes] | None, files: dict | None = None) -> tuple[bytes, str]:
+    """`file` is the clip job's input image; `files` maps extra field names to (filename, bytes)."""
     boundary = uuid.uuid4().hex
     parts = []
     for k, v in fields.items():
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
-    if file:
-        name, data = file
-        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="input_reference"; filename="{name}"\r\n'
-                     f'Content-Type: image/png\r\n\r\n'.encode() + data + b"\r\n")
+    files = {"input_reference": file, **(files or {})} if file else dict(files or {})
+    for field, (name, data) in files.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; filename="{name}"\r\n'
+                     f'Content-Type: application/octet-stream\r\n\r\n'.encode() + data + b"\r\n")
     parts.append(f"--{boundary}--\r\n".encode())
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
+def run_probe_job(q: Queue, name: str, url: str, job: dict) -> None:
+    """kind=probe_loss: POST the video (+ optional image) to /v1/probe/loss; out.json is the returned JSON."""
+    d = q.root / job["id"]
+    files = {"video": (job["video"], (d / job["video"]).read_bytes())}
+    if job["image"]:
+        files["image"] = (job["image"], (d / job["image"]).read_bytes())
+    body, ctype = multipart({"prompt": job["prompt"], "settings": json.dumps(job["params"]["probe"])}, None, files)
+    t = time.time()
+    req = urllib.request.Request(f"{url.rstrip('/')}/v1/probe/loss", data=body, method="POST",
+                                 headers={"Content-Type": ctype})
+    try:
+        with urllib.request.urlopen(req, timeout=7200) as r:
+            result = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:500].decode(errors="replace")
+        q.finish(job, False, f"HTTP {e.code} from {name}: {detail}", retry=e.code >= 500)
+        return
+    except Exception as e:
+        q.finish(job, False, f"{name}: {e}", retry=True)
+        return
+    result["queue"] = {"name": job["name"], "owner": job["owner"], "queue_id": job["id"], "endpoint": name,
+                       "endpoint_url": url, "wall_seconds": round(time.time() - t, 1)}
+    (d / "out.json").write_text(json.dumps(result, indent=1))
+    q.finish(job, True)
+
+
 def run_job(q: Queue, name: str, url: str, job: dict) -> None:
+    if job.get("kind") == "probe_loss":
+        return run_probe_job(q, name, url, job)
     p = job["params"]
     fields = dict(prompt=job["prompt"], size=f"{p['width']}x{p['height']}", num_frames=str(p["num_frames"]),
                   fps=str(p["fps"]), num_inference_steps=str(p["steps"]), guidance_scale=str(p["guidance"]),
@@ -196,6 +239,7 @@ def run_job(q: Queue, name: str, url: str, job: dict) -> None:
     sidecar = {"name": job["name"], **p, "prompt_text": job["prompt"], "negative_prompt_text": p["negative_prompt"],
                "image": job["image"], "owner": job["owner"], "queue_id": job["id"], "endpoint": name,
                "endpoint_url": url, "server_clip_id": headers.get("x-clip-id"),
+               "artifact_ids": [a for a in headers.get("x-artifact-ids", "").split(",") if a],
                "seconds": float(headers.get("x-seconds", 0) or 0), "wall_seconds": round(time.time() - t, 1),
                "model": "nvidia/Cosmos3-Nano via the endpoint above; check that endpoint's #compute post for its stack"}
     (d / "out.json").write_text(json.dumps(sidecar, indent=1))

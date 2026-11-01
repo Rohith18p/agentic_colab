@@ -16,6 +16,11 @@ frame), width, height, num_frames, fps, steps, guidance, flow_shift, seed, negat
 extra_params. `fetch` writes <name>.mp4 and <name>.json (the sidecar: every setting, the endpoint
 that ran it, timings) and skips clips already downloaded.
 
+A line with "kind": "probe_loss" runs the denoising-loss probe instead of a clip: it needs "video" (path to
+an mp4) and optional "image" and "probe" (the settings object of POST /v1/probe/loss: sigmas, seeds, variants...).
+`fetch` writes only <name>.json for it (the probe's result). Clip jobs that capture activations (extra_params.internals)
+list the server's artifact ids in the sidecar's "artifact_ids".
+
 The queue URL comes from --url or COSMOS_QUEUE_URL. Standard library only.
 """
 
@@ -31,7 +36,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_URL = "http://100.111.167.68:8030"
-PARAMS = ("width", "height", "num_frames", "fps", "steps", "guidance", "flow_shift", "seed", "negative_prompt",
+PARAMS = ("kind", "probe", "width", "height", "num_frames", "fps", "steps", "guidance", "flow_shift", "seed", "negative_prompt",
           "extra_params")
 
 
@@ -69,6 +74,9 @@ def submit(a) -> None:
                 **{k: (text(j[k]) if k == "negative_prompt" else j[k]) for k in PARAMS if k in j}}
         if endpoints:
             body["endpoints"] = endpoints
+        if j.get("video"):
+            body["video_b64"] = base64.b64encode(Path(j["video"]).read_bytes()).decode()
+            body["video_name"] = os.path.basename(j["video"])
         if j.get("image"):
             body["image_b64"] = base64.b64encode(Path(j["image"]).read_bytes()).decode()
             body["image_name"] = os.path.basename(j["image"])
@@ -106,12 +114,16 @@ def fetch(a) -> None:
                 print(f"failed: {j['name']} ({j['id']}): {j.get('error')}", file=sys.stderr)
             continue
         mp4 = out / f"{j['name']}.mp4"
-        if mp4.exists():
+        probe = j.get("kind") == "probe_loss"  # no clip: the result is the JSON
+        if (out / f"{j['name']}.json" if probe else mp4).exists():
             continue
         (out / f"{j['name']}.json").write_text(json.dumps(j.get("sidecar", {}), indent=1))
+        if probe:
+            got += 1
+            continue
         mp4.write_bytes(call(f"{a.url}/jobs/{j['id']}/mp4", raw=True))
         got += 1
-    print(f"downloaded {got} clip(s) to {out}; {left} still pending or running")
+    print(f"downloaded {got} result(s) to {out}; {left} still pending or running")
 
 
 def cancel(a) -> None:

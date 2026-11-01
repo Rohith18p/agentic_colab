@@ -130,3 +130,57 @@ def test_fair_share_between_owners(tmp_path):
     first = q.next_job("a")
     second = q.next_job("b")
     assert first["owner"] == "hog" and second["owner"] == "small"  # small isn't stuck behind 5 hog jobs
+
+
+def test_probe_loss_job_posts_to_probe_endpoint_and_stores_json(tmp_path):
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"busy": False, "waiting": 0}).encode())
+
+        def do_POST(self):
+            data = self.rfile.read(int(self.headers["Content-Length"]))
+            seen.append((self.path, data))
+            if self.path == "/v1/probe/loss":
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps({"rows": [{"sigma": 0.5, "loss": 1.25}]}).encode())
+            else:  # a clip job that captured activations: the artifact ids come back in a header
+                self.send_response(200)
+                self.send_header("X-Artifact-Ids", "act_ab12,act_cd34")
+                self.end_headers()
+                self.wfile.write(b"MP4")
+
+    ep = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=ep.serve_forever, daemon=True).start()
+    q, stop, srv, url = start_queue(tmp_path / "queue", {"a": f"http://127.0.0.1:{ep.server_address[1]}"})
+    (tmp_path / "clip.mp4").write_bytes(b"VIDEODATA")
+    (tmp_path / "first.png").write_bytes(b"PNGDATA")
+    jobs = tmp_path / "jobs.jsonl"
+    jobs.write_text("\n".join(json.dumps(j) for j in [
+        {"name": "loss_fwd", "kind": "probe_loss", "prompt": "a ball", "video": "clip.mp4", "image": "first.png",
+         "probe": {"sigmas": [0.5], "seeds": [1]}},
+        {"name": "clip1", "prompt": "a ball"},
+    ]) + "\n")
+    cli(url, "submit", str(jobs), "--owner", "dave-1", cwd=tmp_path)
+    wait(lambda: all(j["status"] == "done" for j in q.jobs.values()))
+    probe_posts = [d for p, d in seen if p == "/v1/probe/loss"]
+    assert len(probe_posts) == 1 and b"VIDEODATA" in probe_posts[0] and b"PNGDATA" in probe_posts[0]
+    assert b'"sigmas": [0.5]' in probe_posts[0] and b'name="settings"' in probe_posts[0]
+    assert "downloaded 2" in cli(url, "fetch", "--owner", "dave-1", "--out", "res", cwd=tmp_path)
+    res = json.loads((tmp_path / "res" / "loss_fwd.json").read_text())
+    assert res["rows"][0]["loss"] == 1.25 and res["queue"]["owner"] == "dave-1"
+    assert not (tmp_path / "res" / "loss_fwd.mp4").exists()  # a probe has no clip
+    assert json.loads((tmp_path / "res" / "clip1.json").read_text())["artifact_ids"] == ["act_ab12", "act_cd34"]
+    assert "downloaded 0" in cli(url, "fetch", "--owner", "dave-1", "--out", "res", cwd=tmp_path)
+    with pytest.raises(ValueError):
+        q.submit({"owner": "d", "name": "x", "prompt": "p", "kind": "probe_loss"})  # no video
+    with pytest.raises(ValueError):
+        q.submit({"owner": "d", "name": "x", "prompt": "p", "kind": "bogus"})
+    stop.set(); srv.shutdown(); ep.shutdown()
