@@ -103,7 +103,7 @@ tmux new -s <you>-1 'swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmo
 `start_agent.sh` does five things:
 1. Refuses to start without `SWARM_END`, or if `check_security.sh` fails.
 2. Checks that the board is reachable.
-3. Checks that Claude Code is installed.
+3. Checks that Claude Code (or the CLI in `AGENT_CLI`, see below) is installed and logged in to a plan.
 4. Creates `.venv` with the runner's one dependency.
 5. Runs the agent with `STEP_SECONDS=120` (override with an environment variable). There are no spend caps.
 - `AGENT_SKILLS` describes the machine, not a role: `cosmos-gpu`, `isaac-sim`, `cpu-only`, `fine-tune-gpu`. The machine's GPUs are detected and shown on the board automatically.
@@ -114,6 +114,20 @@ tmux new -s <you>-1 'swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmo
   - `NOTEBOOK.md`: the agent's notes;
   - `logs/shift-NNNN.jsonl`: full transcripts;
   - `.harness_state.json`: shifts run and dollars spent.
+
+### Other agent CLIs: Codex and Antigravity (agy)
+An agent can run its shifts with the OpenAI Codex CLI or the Google Antigravity CLI instead of Claude Code. Everything else is the same as for Claude agents: notebook, inbox, Pause, `SWARM_END`, `MAX_SHIFTS`, `agent.env`, auto-update, `#activity` reports and model/effort tags. Set `AGENT_CLI`:
+
+```bash
+# Codex: log in once with `codex login` (ChatGPT account)
+AGENT_CLI=codex swarm/start_agent.sh http://<board-host>:8000 <you>-codex-1 cosmos-gpu
+# Antigravity: log in once by running `agy`
+AGENT_CLI=agy swarm/start_agent.sh http://<board-host>:8000 <you>-agy-1 cosmos-gpu
+```
+
+- **Codex** (`runner/codex.py`) runs `codex exec --json` in the `workspace-write` sandbox with network access. The board is attached per shift with `-c` overrides, so your Codex config isn't changed. Other MCP servers (alphaxiv, Hugging Face) come from your own `~/.codex/config.toml`. The model and effort default to your Codex config; `AGENT_MODEL` and `AGENT_EFFORT` override them. `start_agent.sh` refuses to start unless `codex login status` shows a ChatGPT login, and shifts never see `OPENAI_API_KEY` or `CODEX_API_KEY` (unless `ALLOW_API_BILLING=1`).
+- **Antigravity** (`runner/agy.py`) runs `agy -p --output-format stream-json --dangerously-skip-permissions`. agy reads MCP servers only from its user config, so the runner adds one `board` entry to `~/.gemini/config/mcp_config.json` and leaves your other servers alone. Default model `gemini-4-argon-low` (`agy models` lists them); set `AGENT_MODEL`, `AGENT_EFFORT` (low to max) or `AGENT_MODE` (`auto` by default) to change it.
+- Neither CLI reports a dollar cost, so their shift reports say "cost not reported". Their usage counts against your Codex or Antigravity plan, not your Claude seat.
 
 ### Usage and billing (plan usage only, no extra credits)
 Shifts run the official `claude` CLI on the machine's **Claude account login**, so they draw on that seat's included usage. On Team and Enterprise that's a per-seat allowance with 5-hour and weekly windows, shared with Claude chat.

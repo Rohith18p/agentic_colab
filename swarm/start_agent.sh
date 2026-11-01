@@ -11,6 +11,10 @@
 # Optional overrides (env): AGENT_OWNER, AGENT_MODEL, STEP_SECONDS, MAX_SHIFTS, AGENT_WORKDIR,
 # AUTO_UPDATE (see runner/claude_code.py). There are no spend caps.
 #
+# Other agent CLIs: AGENT_CLI=codex (OpenAI Codex, `codex login`; runner/codex.py) or
+# AGENT_CLI=agy (Google Antigravity, `agy` login; runner/agy.py) runs the shifts with that CLI
+# instead of Claude Code, on its owner's plan. Default: AGENT_CLI=claude.
+#
 # Hot reload: the agent pulls this repo before every shift (AUTO_UPDATE=1) and
 # restarts itself if runner code changed; the playbook is re-read every shift;
 # ~/swarm-work/<name>/agent.env (KEY=VALUE) changes the model or budgets live.
@@ -21,7 +25,12 @@ BOARD="${1:?usage: swarm/start_agent.sh <board-url> <agent-name> [skills]}"
 NAME="${2:?usage: swarm/start_agent.sh <board-url> <agent-name> [skills]}"
 SKILLS="${3:-}"
 BOARD="${BOARD%/}"
+CLI="${AGENT_CLI:-claude}"
 cd "$(dirname "$0")/.."
+case "$CLI" in
+  claude|codex|agy) ;;
+  *) echo "AGENT_CLI must be claude, codex or agy (got: $CLI)."; exit 1 ;;
+esac
 
 if [ -z "${SWARM_END:-}" ]; then
   echo "Set SWARM_END first (the time the swarm stops for good), e.g.:"
@@ -37,14 +46,35 @@ if ! curl -fsS --max-time 5 "$BOARD/api/state" >/dev/null; then
   echo "Check that this machine is on the tailnet (tailscale status) and the board is running with HOST=0.0.0.0."
   exit 1
 fi
-if ! command -v claude >/dev/null; then
-  echo "Claude Code is not installed on this machine. Install it, then log in once by running 'claude'."
+if [ "$CLI" = agy ] && [ -d "$HOME/.gemini/antigravity-cli/bin" ]; then export PATH="$HOME/.gemini/antigravity-cli/bin:$PATH"; fi
+if ! command -v "$CLI" >/dev/null; then
+  case "$CLI" in
+    claude) echo "Claude Code is not installed on this machine. Install it, then log in once by running 'claude'." ;;
+    codex) echo "The Codex CLI is not installed on this machine. Install it, then run 'codex login'." ;;
+    agy) echo "The Antigravity CLI (agy) is not installed on this machine. Install it, then log in once by running 'agy'." ;;
+  esac
   exit 1
+fi
+if [ "$CLI" = codex ]; then
+  # Like Claude below: shifts use the ChatGPT login; runner/codex.py removes OPENAI_API_KEY and
+  # CODEX_API_KEY from every shift unless ALLOW_API_BILLING=1.
+  if [ "${ALLOW_API_BILLING:-0}" != "1" ]; then
+    if [[ "$(env -u OPENAI_API_KEY -u CODEX_API_KEY codex login status 2>&1 || true)" != *"Logged in using ChatGPT"* ]]; then
+      echo "Not starting: Codex isn't logged in with a ChatGPT account on this machine."
+      echo "Run 'codex login', then try again."
+      exit 1
+    fi
+    echo "Billing: Codex ChatGPT login (plan usage; no API credits)."
+  fi
+  echo "Research tools: Codex shifts get the board plus the MCP servers in your Codex config (~/.codex/config.toml)."
+elif [ "$CLI" = agy ]; then
+  echo "Billing: your Antigravity login. Model: ${AGENT_MODEL:-gemini-4-argon-low}."
+  echo "The board is added to agy's MCP config (~/.gemini/config/mcp_config.json); your other servers stay."
 fi
 # Shifts run on your `claude` login, so they use your plan's included usage. The harness removes
 # ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from every shift unless ALLOW_API_BILLING=1, because in
 # `claude -p` a key in the environment always wins and bills API credits instead.
-if [ "${ALLOW_API_BILLING:-0}" != "1" ]; then
+if [ "$CLI" = claude ] && [ "${ALLOW_API_BILLING:-0}" != "1" ]; then
   auth=$(env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN claude auth status --json 2>/dev/null || echo '{}')
   read -r logged method plan <<<"$(python3 -c '
 import json, sys
@@ -60,14 +90,16 @@ print(d.get("loggedIn", False), d.get("authMethod", "?"), d.get("subscriptionTyp
 fi
 # Research MCP servers every shift gets (copied from your Claude Code config; see swarm/README.md).
 # Informational only: a missing one just means agents on this machine run without it.
-for server in $(echo "${EXTRA_MCP_SERVERS-alphaxiv,hf-mcp-server}" | tr ',' ' '); do
-  status=$(claude mcp get "$server" 2>/dev/null | sed -n 's/^ *Status: *//p' || true)
-  case "$status" in
-    *onnected*) echo "Research tool $server: connected" ;;
-    "") echo "Research tool $server: not set up, so agents here run without it (to add it: swarm/README.md, \"Research tools\")" ;;
-    *) echo "Research tool $server: $status. Run 'claude', type /mcp and log in to $server." ;;
-  esac
-done
+if [ "$CLI" = claude ]; then
+  for server in $(echo "${EXTRA_MCP_SERVERS-alphaxiv,hf-mcp-server}" | tr ',' ' '); do
+    status=$(claude mcp get "$server" 2>/dev/null | sed -n 's/^ *Status: *//p' || true)
+    case "$status" in
+      *onnected*) echo "Research tool $server: connected" ;;
+      "") echo "Research tool $server: not set up, so agents here run without it (to add it: swarm/README.md, \"Research tools\")" ;;
+      *) echo "Research tool $server: $status. Run 'claude', type /mcp and log in to $server." ;;
+    esac
+  done
+fi
 
 if [ ! -x .venv/bin/python ] || ! env -u PYTHONPATH .venv/bin/python -c "import mcp" 2>/dev/null; then
   echo "Creating .venv with the runner dependency (mcp==2.3.0)..."
@@ -78,8 +110,8 @@ if [ ! -x .venv/bin/python ] || ! env -u PYTHONPATH .venv/bin/python -c "import 
   fi
 fi
 
-export WORKSPACE_URL="$BOARD" AGENT_NAME="$NAME" AGENT_SKILLS="$SKILLS" RUNNER_AGENT=claude
+export WORKSPACE_URL="$BOARD" AGENT_NAME="$NAME" AGENT_SKILLS="$SKILLS" RUNNER_AGENT="$CLI"
 export AGENT_OWNER="${AGENT_OWNER:-$USER}"
 export STEP_SECONDS="${STEP_SECONDS:-120}" AUTO_UPDATE="${AUTO_UPDATE:-1}" SWARM_END
-echo "Starting $NAME (skills: ${SKILLS:-none}) against $BOARD. Work dir: ${AGENT_WORKDIR:-$HOME/swarm-work/$NAME}"
+echo "Starting $NAME ($CLI, skills: ${SKILLS:-none}) against $BOARD. Work dir: ${AGENT_WORKDIR:-$HOME/swarm-work/$NAME}"
 exec env -u PYTHONPATH .venv/bin/python -m runner

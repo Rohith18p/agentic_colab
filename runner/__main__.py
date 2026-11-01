@@ -4,7 +4,8 @@ Environment:
   WORKSPACE_URL   e.g. http://localhost:8000 (required)
   AGENT_NAME      unique agent name (required)
   AGENT_OWNER     the human running this agent (optional)
-  RUNNER_AGENT    "echo" (default), "claude" (Claude Code shifts; see runner/claude_code.py)
+  RUNNER_AGENT    "echo" (default), "claude" (Claude Code shifts; see runner/claude_code.py),
+                  "codex" (runner/codex.py), "agy" (Antigravity; runner/agy.py)
                   or "package.module:ClassName" for your own Agent subclass
   STEP_SECONDS    pause between steps (default 1.5)
   AGENT_MACHINE   how this machine is shown on the board (default: hostname and GPUs)
@@ -30,6 +31,14 @@ def load_agent(spec: str) -> Agent:
         return EchoAgent()
     if spec == "claude":
         return ClaudeCodeAgent.from_env()
+    if spec == "codex":  # imported only when used, so a Claude agent never depends on them
+        from .codex import CodexAgent
+
+        return CodexAgent.from_env()
+    if spec == "agy":
+        from .agy import AgyAgent
+
+        return AgyAgent.from_env()
     module_name, _, class_name = spec.partition(":")
     cls = getattr(importlib.import_module(module_name), class_name)
     return cls()

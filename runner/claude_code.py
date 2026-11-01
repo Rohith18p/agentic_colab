@@ -267,6 +267,11 @@ def self_update(repo: Path, loaded: str | None = None) -> bool:
 
 
 class ClaudeCodeAgent(Agent):
+    # What other agent CLIs (runner/codex.py, runner/agy.py) change; the shift lifecycle is shared.
+    cli_name = "Claude"
+    api_billing_vars: tuple[str, ...] = API_BILLING_VARS  # removed from every shift's environment
+    board_tools_hint = f" (tools named mcp__{MCP_SERVER_NAME}__*)"
+
     def __init__(
         self,
         *,
@@ -536,7 +541,7 @@ class ClaudeCodeAgent(Agent):
     async def _post_report(self, ctx: AgentContext, number: int, started: datetime, result: ShiftResult) -> None:
         """One message per shift in #activity: the agent's own end-of-shift summary plus cost and outcome."""
         minutes = (datetime.now(timezone.utc) - started).total_seconds() / 60
-        head = f"Shift {number} · {minutes:.0f} min · ${result.cost_usd:.2f} (total ${self.state.spent_usd:.2f})"
+        head = f"Shift {number} · {minutes:.0f} min · {self._cost_text(result)}"
         if result.limit:
             head += f" · usage limit: \"{result.limit}\"; next shift after {self.state.blocked_until}"
         if result.stopped:
@@ -547,12 +552,15 @@ class ClaudeCodeAgent(Agent):
             held = await ctx.list_tasks(claimed_by=ctx.agent_name)
             if held:
                 head += " · holds " + ", ".join(f"#{t['id']} {t['title']}" for t in held[:3])
-            summary = result.summary.strip() or "(no summary: the shift ended before Claude wrote one)"
+            summary = result.summary.strip() or f"(no summary: the shift ended before {self.cli_name} wrote one)"
             if len(summary) > 1800:
                 summary = summary[:1800] + " …[truncated]"
             await ctx.post_message(f"{head}\n{summary}", channel="activity")
         except (ToolCallError, WorkspaceUnreachable) as e:  # e.g. paused or after SWARM_END
             log.info("%s: shift report not posted: %s", ctx.agent_name, e)
+
+    def _cost_text(self, result: ShiftResult) -> str:
+        return f"${result.cost_usd:.2f} (total ${self.state.spent_usd:.2f})"
 
     # ------------------------------------------------------------------ shift
 
@@ -581,7 +589,7 @@ class ClaudeCodeAgent(Agent):
         return f"""\
 You are swarm agent `{ctx.agent_name}`, starting shift {number}. Time now: {now}.
 
-The board is the `{MCP_SERVER_NAME}` MCP server (tools named mcp__{MCP_SERVER_NAME}__*). Pass agent_name="{ctx.agent_name}" on every call that takes it.
+The board is the `{MCP_SERVER_NAME}` MCP server{self.board_tools_hint}. Pass agent_name="{ctx.agent_name}" on every call that takes it.
 {budget}
 Your working directory persists between shifts: {self.workdir(ctx.agent_name)}
 Your notes from earlier shifts are in NOTEBOOK.md there.
@@ -619,7 +627,7 @@ If you check read_inbox again during this shift, pass cursor={ctx.inbox_cursor}.
         result = ShiftResult()
         env = {**os.environ, "AGENT_NAME": ctx.agent_name, "WORKSPACE_MCP_URL": ctx.client.url}
         if not self.allow_api_billing:
-            for var in API_BILLING_VARS:  # use the `claude` login (plan usage), never API credits
+            for var in self.api_billing_vars:  # use the CLI's plan login, never API credits
                 env.pop(var, None)
         output_done = anyio.Event()
 
