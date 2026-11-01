@@ -127,11 +127,14 @@ class Queue:
             self._save(job)
         return job
 
-    def next_job(self, endpoint: str) -> dict | None:
-        """Oldest pending job of the owner with the fewest jobs running, so no one owner hogs the GPUs."""
+    def next_job(self, endpoint: str, features: set | None = None) -> dict | None:
+        """Oldest pending job of the owner with the fewest jobs running, so no one owner hogs the GPUs.
+        A job that uses a server option (extra_params noise / internals / latent) only goes to an endpoint whose
+        /health lists that feature, so an older server can never silently ignore it (#4989)."""
         with LOCK:
             pending = [j for j in self.jobs.values() if j["status"] == "pending"
-                       and (not j["endpoints"] or endpoint in j["endpoints"])]
+                       and (not j["endpoints"] or endpoint in j["endpoints"])
+                       and needs(j) <= (features or set())]
             if not pending:
                 return None
             running = {}
@@ -157,6 +160,15 @@ class Queue:
         if job["status"] == "done" and side.exists():
             out["sidecar"] = json.loads(side.read_text())
         return out
+
+
+OPTION_FEATURES = ("noise", "internals", "latent")
+
+
+def needs(job: dict) -> set:
+    """Server features a job depends on: the extra_params options that older servers silently ignore."""
+    extra = (job.get("params") or {}).get("extra_params") or {}
+    return {k for k in OPTION_FEATURES if k in extra}
 
 
 def health(url: str) -> dict | None:
@@ -242,8 +254,30 @@ def run_job(q: Queue, name: str, url: str, job: dict) -> None:
                "artifact_ids": [a for a in headers.get("x-artifact-ids", "").split(",") if a],
                "seconds": float(headers.get("x-seconds", 0) or 0), "wall_seconds": round(time.time() - t, 1),
                "model": "nvidia/Cosmos3-Nano via the endpoint above; check that endpoint's #compute post for its stack"}
+    sidecar["relayed"] = relay_server_files(url, d, sidecar["server_clip_id"], sidecar["artifact_ids"])
     (d / "out.json").write_text(json.dumps(sidecar, indent=1))
     q.finish(job, True)
+
+
+def relay_server_files(url: str, d: Path, clip_id: str | None, artifact_ids: list[str]) -> list[str]:
+    """Copy the endpoint's own sidecar (what actually ran: sigmas, executed hooks, noise, server revision) and any
+    artifacts (captures, latents) into the job directory, so clients get them with `fetch`. Best effort: an older
+    endpoint without the route just yields nothing."""
+    got = []
+    base = url.rstrip("/")
+    targets = ([("server_sidecar.json", f"{base}/v1/sidecars/{clip_id}")] if clip_id else []) + \
+              [(f"artifacts/{a}.npz", f"{base}/v1/artifacts/{a}") for a in artifact_ids if re.fullmatch(r"[\w.-]+", a)]
+    for rel, src in targets:
+        try:
+            with urllib.request.urlopen(src, timeout=300) as r:
+                data = r.read()
+        except Exception:
+            continue
+        f = d / rel
+        f.parent.mkdir(exist_ok=True)
+        f.write_bytes(data)
+        got.append(rel)
+    return got
 
 
 def worker(q: Queue, name: str, url: str, stop: threading.Event, poll: float) -> None:
@@ -255,7 +289,7 @@ def worker(q: Queue, name: str, url: str, stop: threading.Event, poll: float) ->
         if not h or h.get("busy") or h.get("waiting"):  # down, or busy with someone's direct request
             stop.wait(poll)
             continue
-        job = q.next_job(name)
+        job = q.next_job(name, set(h.get("features") or []))
         if job is None:
             stop.wait(poll)
             continue
@@ -283,7 +317,7 @@ def make_handler(q: Queue):
             self.wfile.write(data)
 
         def job_from_path(self, path: str) -> dict | None:
-            m = re.match(r"^/jobs/([0-9a-f-]+)(/mp4)?$", path)
+            m = re.match(r"^/jobs/([0-9a-f-]+)(/mp4|/files/server_sidecar\.json|/files/artifacts/[\w.-]+\.npz)?$", path)
             return q.jobs.get(m.group(1)) if m else None
 
         def do_GET(self):
@@ -311,6 +345,16 @@ def make_handler(q: Queue):
             job = self.job_from_path(u.path)
             if job is None:
                 return self.send(404, {"error": "no such job"})
+            if "/files/" in u.path:  # relayed endpoint sidecar or artifact (see relay_server_files)
+                f = q.root / job["id"] / u.path.split("/files/", 1)[1]
+                if not f.is_file():
+                    return self.send(404, {"error": "not relayed for this job"})
+                data = f.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                return self.wfile.write(data)
             if u.path.endswith("/mp4"):
                 f = q.root / job["id"] / "out.mp4"
                 if not f.exists():

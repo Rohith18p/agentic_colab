@@ -19,7 +19,9 @@ that ran it, timings) and skips clips already downloaded.
 A line with "kind": "probe_loss" runs the denoising-loss probe instead of a clip: it needs "video" (path to
 an mp4) and optional "image" and "probe" (the settings object of POST /v1/probe/loss: sigmas, seeds, variants...).
 `fetch` writes only <name>.json for it (the probe's result). Clip jobs that capture activations (extra_params.internals)
-list the server's artifact ids in the sidecar's "artifact_ids".
+list the server's artifact ids in the sidecar's "artifact_ids". The queue also relays the endpoint's own sidecar (what
+actually ran: sigmas, executed hooks, noise, server revision) and the artifacts; `fetch` writes them as
+<name>.server.json and <name>.<artifact_id>.npz.
 
 The queue URL comes from --url or COSMOS_QUEUE_URL. Standard library only.
 """
@@ -122,6 +124,9 @@ def fetch(a) -> None:
             got += 1
             continue
         mp4.write_bytes(call(f"{a.url}/jobs/{j['id']}/mp4", raw=True))
+        for rel in j.get("sidecar", {}).get("relayed", []):  # the endpoint's own sidecar and artifacts
+            dest = out / (f"{j['name']}.server.json" if rel == "server_sidecar.json" else f"{j['name']}.{Path(rel).name}")
+            dest.write_bytes(call(f"{a.url}/jobs/{j['id']}/files/{rel}", raw=True))
         got += 1
     print(f"downloaded {got} result(s) to {out}; {left} still pending or running")
 

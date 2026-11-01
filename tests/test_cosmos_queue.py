@@ -184,3 +184,16 @@ def test_probe_loss_job_posts_to_probe_endpoint_and_stores_json(tmp_path):
     with pytest.raises(ValueError):
         q.submit({"owner": "d", "name": "x", "prompt": "p", "kind": "bogus"})
     stop.set(); srv.shutdown(); ep.shutdown()
+
+
+def test_option_jobs_only_go_to_endpoints_that_support_them(tmp_path):
+    # An older server accepts extra_params.noise/internals but ignores them (#4989), so the queue must not send
+    # such a job there: it waits for an endpoint whose /health lists the feature.
+    q = qs.Queue(tmp_path, {"old": "http://old", "new": "http://new"})
+    plain = q.submit({"owner": "a", "name": "plain", "prompt": "p"})
+    noisy = q.submit({"owner": "b", "name": "noisy", "prompt": "p", "extra_params": {"noise": {"device": "cpu"}}})
+    assert qs.needs(q.jobs[noisy["id"]]) == {"noise"} and qs.needs(q.jobs[plain["id"]]) == set()
+    got = q.next_job("old", set())
+    assert got["name"] == "plain"
+    assert q.next_job("old", set()) is None  # the noise job is not given to the old server
+    assert q.next_job("new", {"noise", "internals"})["name"] == "noisy"
