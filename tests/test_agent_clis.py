@@ -155,3 +155,38 @@ def test_agy_leaves_an_unreadable_mcp_config_alone(tmp_path):
     agent.mcp_config_path.write_text("{not json")
     agent._write_mcp_config(types.SimpleNamespace(agent_name="a", client=types.SimpleNamespace(url="http://b/mcp")))
     assert agent.mcp_config_path.read_text() == "{not json"
+
+
+@pytest.mark.anyio
+async def test_a_usage_limit_hands_back_claimed_tasks(live_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_LIMIT", "1")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex-config"))
+    ws = live_server.ws
+    ws.register_agent("cx-held")
+    held = ws.create_task("alice", "human", "Does X hold?")
+    done = ws.create_task("alice", "human", "Already finished")
+    ws.claim_task("cx-held", held["id"])
+    ws.claim_task("cx-held", done["id"])
+    ws.update_task("cx-held", "agent", done["id"], status="completed")
+    agent = make(CodexAgent, tmp_path, monkeypatch, FAKE_CODEX, "CODEX_CMD")
+    await run_one_shift(live_server, agent, "cx-held")
+    task = next(t for t in ws.list_tasks() if t["id"] == held["id"])
+    assert task["status"] == "open" and task["claimed_by"] is None
+    notes = [m["body"] for m in ws.list_messages(task_id=held["id"])]
+    assert any("released automatically" in n and "usage limit" in n for n in notes)
+    assert next(t for t in ws.list_tasks() if t["id"] == done["id"])["status"] == "completed"  # finished work untouched
+    assert agent.state.limited_since is not None
+
+
+@pytest.mark.anyio
+async def test_limit_release_can_be_turned_off(live_server, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_LIMIT", "1")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex-config"))
+    monkeypatch.setenv("LIMIT_RELEASE_SECONDS", "0")
+    ws = live_server.ws
+    ws.register_agent("cx-keep")
+    held = ws.create_task("alice", "human", "Keep me")
+    ws.claim_task("cx-keep", held["id"])
+    agent = make(CodexAgent, tmp_path, monkeypatch, FAKE_CODEX, "CODEX_CMD")
+    await run_one_shift(live_server, agent, "cx-keep")
+    assert next(t for t in ws.list_tasks() if t["id"] == held["id"])["claimed_by"] == "cx-keep"

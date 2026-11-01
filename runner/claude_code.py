@@ -54,6 +54,10 @@ Environment (all optional except what the Runner needs):
                        bills API credits. In `claude -p`, a key in the environment always wins.
   LIMIT_BACKOFF_SECONDS  after a plan usage-limit or spend-limit error, wait this long before the
                        next shift instead of retrying (default 1800)
+  LIMIT_RELEASE_SECONDS  when usage limits will keep the agent from working for at least this long
+                       (counting the current backoff), it releases its claimed tasks with a hand-off
+                       note so others can take them (default 1800, so the first limit releases;
+                       "0" never releases). It can reclaim them later if they are still open.
 """
 
 from __future__ import annotations
@@ -144,6 +148,7 @@ class HarnessState:
     shifts: int = 0
     last_stop: str | None = None
     blocked_until: str | None = None  # ISO time; no shifts before it (after a usage limit)
+    limited_since: str | None = None  # ISO time of the first usage limit in the current streak
     history: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -295,6 +300,7 @@ class ClaudeCodeAgent(Agent):
         shift_reports: bool = True,
         allow_api_billing: bool = False,
         limit_backoff_seconds: float = 1800,
+        limit_release_seconds: float = 1800,
         extra_mcp_servers: list[str] | None = None,
         claude_config: Path | str | None = None,
         effort: str | None = None,
@@ -319,6 +325,7 @@ class ClaudeCodeAgent(Agent):
         self.shift_reports = shift_reports
         self.allow_api_billing = allow_api_billing
         self.limit_backoff_seconds = limit_backoff_seconds
+        self.limit_release_seconds = limit_release_seconds
         self.extra_mcp_servers = _names(DEFAULT_EXTRA_MCP) if extra_mcp_servers is None else list(extra_mcp_servers)
         self.claude_config = Path(claude_config) if claude_config else claude_config_file()
         self.mcp_servers: list[str] = [MCP_SERVER_NAME]  # attached to the latest shift
@@ -353,6 +360,7 @@ class ClaudeCodeAgent(Agent):
             shift_reports=os.environ.get("SHIFT_REPORTS", "1") != "0",
             allow_api_billing=os.environ.get("ALLOW_API_BILLING") == "1",
             limit_backoff_seconds=_env_float("LIMIT_BACKOFF_SECONDS", 1800),
+            limit_release_seconds=_env_float("LIMIT_RELEASE_SECONDS", 1800),
             extra_mcp_servers=_names(os.environ.get("EXTRA_MCP_SERVERS", DEFAULT_EXTRA_MCP)),
             effort=os.environ.get("AGENT_EFFORT") or None,
         )
@@ -518,11 +526,17 @@ class ClaudeCodeAgent(Agent):
         self.state.spent_usd += result.cost_usd
         self.state.last_stop = result.stopped
         if result.limit:
-            until = datetime.now(timezone.utc) + timedelta(seconds=self.limit_backoff_seconds)
+            now = datetime.now(timezone.utc)
+            until = now + timedelta(seconds=self.limit_backoff_seconds)
             self.state.blocked_until = until.isoformat(timespec="seconds")
+            self.state.limited_since = self.state.limited_since or now.isoformat(timespec="seconds")
             log.warning("%s: %s; no shifts until %s", ctx.agent_name, result.limit, self.state.blocked_until)
+            if self.limit_release_seconds and (
+                    until - datetime.fromisoformat(self.state.limited_since)).total_seconds() >= self.limit_release_seconds:
+                await self._release_held(ctx, result.limit)
         else:
             self.state.blocked_until = None
+            self.state.limited_since = None
         self.state.history = (self.state.history + [{
             "shift": number,
             "ended_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -537,6 +551,28 @@ class ClaudeCodeAgent(Agent):
         if self.shift_reports:
             await self._post_report(ctx, number, started, result)
         return True
+
+    async def _release_held(self, ctx: AgentContext, limit: str) -> None:
+        """Hand back claimed tasks while a usage limit keeps this agent from working on them.
+
+        Heartbeats keep leases alive even while no shift can run, so without this a rate-limited
+        agent would hold its tasks for hours."""
+        try:
+            held = [t for t in await ctx.list_tasks(claimed_by=ctx.agent_name)
+                    if t.get("status") in ("claimed", "in_progress")]
+        except Exception as e:  # board hiccup: try again after the next limited shift
+            log.warning("%s: couldn't list held tasks to release them: %s", ctx.agent_name, e)
+            return
+        notebook = self.workdir(ctx.agent_name) / "NOTEBOOK.md"
+        for t in held:
+            reason = (f"released automatically: {ctx.agent_name} is held up by a usage limit ({limit}) until at "
+                      f"least {self.state.blocked_until}. Progress notes are in its notebook ({notebook}) and in "
+                      f"this thread. Anyone may take it; {ctx.agent_name} will reclaim it later if it is still open.")
+            try:
+                await ctx.release_task(t["id"], reason)
+                log.info("%s: released task %s during a usage limit", ctx.agent_name, t["id"])
+            except Exception as e:
+                log.warning("%s: couldn't release task %s: %s", ctx.agent_name, t["id"], e)
 
     async def _post_report(self, ctx: AgentContext, number: int, started: datetime, result: ShiftResult) -> None:
         """One message per shift in #activity: the agent's own end-of-shift summary plus cost and outcome."""
