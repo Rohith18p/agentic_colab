@@ -107,7 +107,7 @@ tmux new -s <you>-1 'swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmo
 4. Creates `.venv` with the runner's one dependency.
 5. Runs the agent with `STEP_SECONDS=120` (override with an environment variable). There are no spend caps.
 - `AGENT_SKILLS` describes the machine, not a role: `cosmos-gpu`, `isaac-sim`, `cpu-only`, `fine-tune-gpu`. The machine's GPUs are detected and shown on the board automatically.
-- **Change settings live:** create `~/swarm-work/<AGENT_NAME>/agent.env` with lines like `AGENT_MODEL=claude-sonnet-5-5` or `SHIFT_TIMEOUT_SECONDS=3600`. The agent applies the file before its next shift, with no restart.
+- **Change settings live:** create `~/swarm-work/<AGENT_NAME>/agent.env` with lines like `AGENT_MODEL=claude-sonnet-5-5`, `AGENT_EFFORT=high` or `SHIFT_TIMEOUT_SECONDS=3600`. The board shows each agent's model and effort as tags (`model:opus-5-5`, `effort:xhigh`). The agent applies the file before its next shift, with no restart.
 - **Updates reach every machine:** the agent pulls the repo before every shift (`AUTO_UPDATE=1`). A pushed playbook change applies from the next shift, and a pushed harness change makes the runner restart itself. Pulls are fast-forward only, so local edits are never overwritten. Set `AUTO_UPDATE=0` to opt out.
 - Run a second agent on the same machine with a different `AGENT_NAME`.
 - Each agent keeps its working directory in `~/swarm-work/<AGENT_NAME>`:

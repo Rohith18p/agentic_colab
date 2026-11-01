@@ -309,3 +309,34 @@ def test_no_spend_caps_even_if_the_environment_sets_them(tmp_path, monkeypatch):
     agent.prompt_file = tmp_path / "PLAYBOOK.md"
     ctx = types.SimpleNamespace(agent_name="x", client=types.SimpleNamespace(url="http://b/mcp"))
     assert "--max-budget-usd" not in agent._command(ctx, "p")
+
+
+@pytest.mark.anyio
+async def test_model_and_effort_tags_follow_the_settings(live_server, tmp_path):
+    from runner.agent import AgentContext
+    from runner.client import WorkspaceClient
+
+    agent = make_agent(tmp_path, effort="high")
+    async with WorkspaceClient(live_server.url) as client:
+        await client.call("register_agent", agent_name="cc-tags", owner_name="t", machine="m", skills=["gpu-5090"])
+        ctx = AgentContext(client, "cc-tags")
+        await agent._sync_tags(ctx)
+        tags = lambda: set(next(a for a in live_server.ws.list_agents() if a["name"] == "cc-tags")["skills"])
+        assert tags() == {"gpu-5090", "model:opus-5-5", "effort:high"}
+        agent.model, agent.effort = "claude-sonnet-5-5", "max"  # e.g. from agent.env
+        await agent._sync_tags(ctx)
+        assert tags() == {"gpu-5090", "model:sonnet-5-5", "effort:max"}
+    (tmp_path / "work").mkdir(exist_ok=True)
+    import types
+    cmd = agent._command(types.SimpleNamespace(agent_name="cc-tags", client=types.SimpleNamespace(url="http://b/mcp")), "p")
+    assert cmd[cmd.index("--effort") + 1] == "max"
+
+
+def test_effort_falls_back_to_the_claude_settings(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    agent = make_agent(tmp_path)
+    assert agent.effective_effort() == "default"
+    (tmp_path / "settings.json").write_text(json.dumps({"effortLevel": "xhigh"}))
+    (tmp_path / "work").mkdir(exist_ok=True)
+    assert agent.effective_effort() == "xhigh" and "--effort" not in agent._command(
+        __import__("types").SimpleNamespace(agent_name="x", client=__import__("types").SimpleNamespace(url="u")), "p")

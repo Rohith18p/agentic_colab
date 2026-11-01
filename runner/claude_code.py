@@ -21,6 +21,10 @@ Hot reload between shifts:
 Environment (all optional except what the Runner needs):
   AGENT_CMD            command that runs Claude Code (default "claude")
   AGENT_MODEL          model for every shift (default "claude-opus-5-5")
+  AGENT_EFFORT         Claude Code --effort for every shift: low, medium, high, xhigh or max (default:
+                       unset, so Claude Code uses the machine's own setting, e.g. effortLevel in
+                       ~/.claude/settings.json). The agent's board tags show both, as model:<model>
+                       and effort:<level>, and follow changes.
   AGENT_PROMPT_FILE    playbook appended to the system prompt (default swarm/AGENT_PROMPT.md)
   AGENT_WORKDIR        persistent working directory (default ~/swarm-work/<AGENT_NAME>)
   AGENT_SKILLS         comma-separated machine capabilities, e.g. "cosmos-gpu,isaac-sim"
@@ -169,6 +173,7 @@ def parse_end(value: str | None) -> datetime | None:
 # Settings that agent.env may change between shifts: env name -> (attribute, parser).
 HOT_SETTINGS = {
     "AGENT_MODEL": ("model", str),
+    "AGENT_EFFORT": ("effort", _optional(str)),
     "MAX_SHIFTS": ("max_shifts", _optional(int)),
     "SHIFT_TIMEOUT_SECONDS": ("shift_timeout_seconds", float),
     "PERMISSION_MODE": ("permission_mode", str),
@@ -183,6 +188,16 @@ def claude_config_file() -> Path:
     """Where Claude Code keeps user-scope MCP servers (`claude mcp add --scope user`)."""
     base = os.environ.get("CLAUDE_CONFIG_DIR")
     return Path(base).expanduser() / ".claude.json" if base else Path.home() / ".claude.json"
+
+
+def claude_settings_effort() -> str | None:
+    """effortLevel from Claude Code's user settings, which headless shifts use when --effort isn't given."""
+    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
+    try:
+        value = json.loads((base / "settings.json").read_text()).get("effortLevel")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return value if isinstance(value, str) and value else None
 
 
 def user_mcp_servers(path: Path) -> dict[str, dict]:
@@ -277,6 +292,7 @@ class ClaudeCodeAgent(Agent):
         limit_backoff_seconds: float = 1800,
         extra_mcp_servers: list[str] | None = None,
         claude_config: Path | str | None = None,
+        effort: str | None = None,
     ) -> None:
         self.command = command or ["claude"]
         self.model = model
@@ -301,6 +317,8 @@ class ClaudeCodeAgent(Agent):
         self.extra_mcp_servers = _names(DEFAULT_EXTRA_MCP) if extra_mcp_servers is None else list(extra_mcp_servers)
         self.claude_config = Path(claude_config) if claude_config else claude_config_file()
         self.mcp_servers: list[str] = [MCP_SERVER_NAME]  # attached to the latest shift
+        self.effort = effort
+        self._tags_synced: set[str] | None = None  # model:/effort: tags last written to the board
         self._missing_mcp_warned: set[str] = set()
         self.done = False  # set at SWARM_END; the Runner then stops
         self.state = HarnessState()
@@ -331,6 +349,7 @@ class ClaudeCodeAgent(Agent):
             allow_api_billing=os.environ.get("ALLOW_API_BILLING") == "1",
             limit_backoff_seconds=_env_float("LIMIT_BACKOFF_SECONDS", 1800),
             extra_mcp_servers=_names(os.environ.get("EXTRA_MCP_SERVERS", DEFAULT_EXTRA_MCP)),
+            effort=os.environ.get("AGENT_EFFORT") or None,
         )
 
     # ------------------------------------------------------------------ files
@@ -367,6 +386,26 @@ class ClaudeCodeAgent(Agent):
         path.write_text(json.dumps({"mcpServers": servers}, indent=2))
         path.chmod(0o600)  # copied definitions can carry tokens in headers
         return path
+
+    def effective_effort(self) -> str:
+        return self.effort or claude_settings_effort() or "default"
+
+    def model_tags(self) -> set[str]:
+        return {f"model:{self.model.removeprefix('claude-')}", f"effort:{self.effective_effort()}"}
+
+    async def _sync_tags(self, ctx: AgentContext) -> None:
+        """Keep this agent's model:/effort: tags on the board in step with its settings."""
+        want = self.model_tags()
+        if want == self._tags_synced:
+            return
+        try:
+            agents = (await ctx.call("list_agents"))["agents"]
+            have = set(next((a.get("skills") or [] for a in agents if a["name"] == ctx.agent_name), []))
+            stale = sorted(t for t in have if t.startswith(("model:", "effort:")) and t not in want)
+            await ctx.call("update_skills", agent_name=ctx.agent_name, add=sorted(want - have), remove=stale)
+            self._tags_synced = want
+        except (ToolCallError, WorkspaceUnreachable, KeyError) as e:
+            log.warning("%s: couldn't update model/effort tags: %s", ctx.agent_name, e)
 
     def _allowed_tools(self) -> str:
         tools = self.allowed_tools.split()
@@ -440,6 +479,7 @@ class ClaudeCodeAgent(Agent):
             log.warning("%s: SWARM_END (%s) has passed; stopping for good", ctx.agent_name, self.end.isoformat())
             self.done = True
             return False
+        await self._sync_tags(ctx)
         if self.state.blocked_until and datetime.now(timezone.utc) < datetime.fromisoformat(self.state.blocked_until):
             return False  # waiting out a plan usage limit
         reason = self._out_of_budget()
@@ -570,6 +610,7 @@ If you check read_inbox again during this shift, pass cursor={ctx.inbox_cursor}.
             "--permission-mode", self.permission_mode,
             "--allowedTools", self._allowed_tools(),
             *([] if self.shift_budget_usd is None else ["--max-budget-usd", f"{self.shift_budget_usd:.2f}"]),
+            *([] if not self.effort else ["--effort", self.effort]),
             "--disallowedTools", DISALLOWED_TOOLS,
             *self.extra_args,
         ]
