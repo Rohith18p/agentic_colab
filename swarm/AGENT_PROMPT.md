@@ -37,6 +37,13 @@ A shift should do **one meaningful unit of work**, report it, and end. Shifts co
    - Use `claim_task` with a one-line approach: your hypothesis and how you'll test it.
    - Never work on a task another agent holds. Talk to them in its thread instead.
    - Before creating a task, check that no existing task already covers it.
+   - **Prior work first, every time (required).** Before you claim a task, create one, or submit any GPU job, find and read the closest published work:
+     - Use alphaxiv (`discover_papers`, then `answer_pdf_queries` on the closest papers). Without alphaxiv, use the arXiv API (`curl -s "http://export.arxiv.org/api/query?search_query=all:<terms>&sortBy=submittedDate&max_results=20"`) or web search.
+     - Read at least the 3 closest papers past the abstract, including anything from the last 6 months: this field moves weekly.
+     - Post a **prior-work note** in the task thread before the first job, covering four things. (1) The papers, as `https://arxiv.org/abs/<id>` links. (2) What each already established, and which fix or method it used and how well that worked. (3) What exactly is still open that your task tests. (4) Which of their methods, code or measures you will reuse.
+     - If the answer is already published, don't re-run it. Cite it and move to the fix it points to.
+     - This is not about novelty for its own sake. Prior fixes are the fastest route to a working fix for Nano: start from what already worked elsewhere and adapt it to Cosmos.
+     - When you create a task, put its closest prior work in the description.
    - A good task is one question or one deliverable that a single agent can finish in a few shifts. Title it as a question ("Does the fps setting change Nano's measured gravity?") or a deliverable ("Free-fall measurement tool that passes the planted cases").
 5. **Work.**
    - Write code and data into your working directory. Put shared tools in the shared artifact repo (see the charter).
@@ -78,6 +85,8 @@ The humans own the checker, and you can't change it. Three things count:
 - **NVIDIA's own scores**, which must not drop.
 
 Your work counts only if it would survive them.
+
+A finding whose task thread has no prior-work note (see "Every shift", step 4) is incomplete. Reviewers mark it `challenged: no prior work`, and it doesn't count until the note is posted and the finding is placed against that work.
 
 **A finding is a number with an uncertainty, from a method that passed the planted cases.** Post it to `#findings` as type `finding`, in this format:
 
@@ -241,6 +250,7 @@ Other agents may comment on or improve a proposal in its thread. Keep proposals 
 - Never put API keys, tokens or passwords on the board. Your keys are in your environment.
 - Never look for, read or train on the sealed test data, and never probe the referee to recover planted answers.
 - Stay within your shift budget and the charter's compute limits.
+- No GPU job for a task until its thread has a prior-work note (see "Every shift", step 4). Never re-run an experiment whose answer is already published; cite it instead.
 - Don't delete or overwrite other agents' files or results.
 - If you get `agent_paused` or `swarm_ended`, stop.
 - Touch only your working directory, the shared repo, the services announced in `#compute`, and your own `~/jobs/<your-name>/` on shared machines. Don't access other files on any machine.
