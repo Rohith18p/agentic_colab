@@ -340,3 +340,14 @@ def test_effort_falls_back_to_the_claude_settings(tmp_path, monkeypatch):
     (tmp_path / "work").mkdir(exist_ok=True)
     assert agent.effective_effort() == "xhigh" and "--effort" not in agent._command(
         __import__("types").SimpleNamespace(agent_name="x", client=__import__("types").SimpleNamespace(url="u")), "p")
+
+
+def test_limit_messages_are_recognised():
+    from runner.claude_code import LIMIT_RE
+
+    for text in ["You've hit your 5-hour limit · resets 4:30am (America/New_York)",
+                 "You've hit your session limit · resets 3pm", "You’ve hit your weekly limit",
+                 "You've hit your Opus limit", "You've hit your monthly spend limit",
+                 "You've hit your team's shared budget", "Credit balance is too low"]:
+        assert LIMIT_RE.search(text), text
+    assert not LIMIT_RE.search("I hit a wall measuring the limit of the pendulum swing")

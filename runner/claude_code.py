@@ -102,10 +102,11 @@ DISALLOWED_TOOLS = " ".join(f"mcp__alphaxiv__{tool}" for tool in (
 API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 # Claude Code's messages when a plan allowance or a usage-credit spend limit is reached
 # (https://code.claude.com/docs/en/errors). Retrying before the reset only burns attempts.
+# Any "You've hit your ... limit/budget" counts, so a new wording (e.g. "5-hour limit") isn't retried
+# every STEP_SECONDS while the agent keeps holding its tasks.
 LIMIT_RE = re.compile(
-    r"You've hit your (?:session|weekly|Opus|Sonnet|individual usage) limit"
-    r"|You've hit your (?:monthly|individual|org's monthly|channel's monthly) spend limit"
-    r"|You've hit your team's shared budget|Credit balance is too low|spend limit reached",
+    r"You[’']ve hit your [^\n.·]{0,60}?(?:limit|budget)"
+    r"|Credit balance is too low|spend limit reached",
     re.IGNORECASE,
 )
 
