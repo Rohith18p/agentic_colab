@@ -22,6 +22,10 @@ SHARE_MODE="${SHARE_MODE:---admin}"
 OLD_REFEREE="http://nail-legion-pro-7-16iax10h.tail0c526a.ts.net:8090"
 cd "$(dirname "$0")/.."
 SCRIPT_REPO="$PWD"
+# Board and referee listen on this machine's tailnet address only, never on its LAN or public interfaces.
+TS_IP=$(tailscale ip -4 2>/dev/null | head -1)
+[ -n "$TS_IP" ] || { echo "This machine has no tailnet IPv4 address (is Tailscale up? 'tailscale status')."; exit 1; }
+WAIT_TS="until ip -4 addr show tailscale0 2>/dev/null | grep -q $TS_IP; do sleep 2; done;"  # at boot, before binding
 step() { echo; echo "=== $*"; }
 run()  { echo "+ $*"; [ $DRY -eq 1 ] || eval "$@"; }
 warn() { echo "warning: $*"; }
@@ -54,7 +58,7 @@ elif [ "$BOARD_DIR" != "$SCRIPT_REPO" ]; then
 fi
 DB_ENV=""; [ -n "$DB_URL" ] && DB_ENV="DATABASE_URL='$DB_URL' "
 # scripts/board_loop.sh restarts the board when it exits, stops answering, or a leftover holds the port.
-BOARD_LOOP="cd '$BOARD_DIR' && ${DB_ENV}HOST=0.0.0.0 SWARM_END=$SWARM_END scripts/board_loop.sh"
+BOARD_LOOP="cd '$BOARD_DIR' && ${DB_ENV}HOST=$TS_IP SWARM_END=$SWARM_END scripts/board_loop.sh"
 
 step "3/7 Share this machine with the swarm (Tailscale SSH as the 'swarm' user, mode $SHARE_MODE)"
 if [ "$SHARE_MODE" = "none" ]; then echo "skipped (SHARE_MODE=none)"
@@ -97,7 +101,7 @@ fi
 if [ ! -f "$REF_DIR/store/planted/planted.json" ]; then
   run "'$REF_PY' swarm/referee/make_planted.py --store '$REF_DIR/store' --secret '$REF_DIR/secret'"
 fi
-REF_CMD="cd '$SCRIPT_REPO' && '$REF_PY' swarm/referee/referee.py --manifest '$REF_DIR/store/planted/planted.json' --answers '$REF_DIR/secret/answers.json' --until $SWARM_END --board-url $BOARD_URL --log '$REF_DIR/secret/submissions.jsonl'"
+REF_CMD="$WAIT_TS cd '$SCRIPT_REPO' && '$REF_PY' swarm/referee/referee.py --host $TS_IP --manifest '$REF_DIR/store/planted/planted.json' --answers '$REF_DIR/secret/answers.json' --until $SWARM_END --board-url $BOARD_URL --log '$REF_DIR/secret/submissions.jsonl'"
 if tmux has-session -t referee 2>/dev/null; then echo "tmux session 'referee' already running"
 else run "tmux new -d -s referee \"$REF_CMD\""; fi
 CRON_REF="@reboot tmux new -d -s referee \"$REF_CMD\" # swarm-referee"
@@ -117,7 +121,7 @@ run "python3 scripts/board.py --url '$BOARD_URL' --as 'gb10 setup' post compute 
 step "Checks"
 sleep 8
 curl -fsS --max-time 5 "$BOARD_URL/healthz" >/dev/null && echo "  ok    board answers at $BOARD_URL" || echo "  FAIL  board not answering at $BOARD_URL (tmux attach -t board)"
-curl -fsS --max-time 5 "http://localhost:8090/planted" >/dev/null && echo "  ok    referee answers on :8090" || echo "  FAIL  referee not answering (tmux attach -t referee)"
+curl -fsS --max-time 5 "http://$TS_IP:8090/planted" >/dev/null && echo "  ok    referee answers on :8090" || echo "  FAIL  referee not answering (tmux attach -t referee)"
 id swarm >/dev/null 2>&1 && echo "  ok    swarm user exists (agents: ssh swarm@$HOST_NAME)" || echo "  warn  no swarm user"
 crontab -l | grep -c '# swarm-' | sed 's/^/  ok    reboot entries in crontab: /'
 SWARM_END="$SWARM_END" swarm/check_security.sh "$BOARD_URL" --board || warn "some security checks fail until the Tailscale policy and tags are set in the admin console (see swarm/GB10_SETUP.md)"
