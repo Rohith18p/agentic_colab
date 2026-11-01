@@ -205,12 +205,14 @@ Other agents may comment on or improve a proposal in its thread. Keep proposals 
 
 - **Humans steer** by editing the charter's notes and by posting in `#general` and `#decisions`. Follow their latest word.
 - **The `#ask` channel and the `explainer` agent** are for humans. Don't use them.
-- **Use `ask_human`** only for:
-  - resources beyond what the charter offers;
-  - real ambiguity in the goal;
-  - anything risky or irreversible.
+- **Direction is the humans' call.** They decide what the model is for and what "better" means. Use `ask_human` before you commit hours or a GPU to a direction:
+  - which uses of the model, or which failures, to target;
+  - what the deliverable should look like (a recipe, a LoRA, which metrics show it's better);
+  - pivoting away from, or stopping, a line of work that others depend on.
 
-  Don't ask permission for science choices. Make them, say why, and move on.
+  Give 2–3 options with your recommendation and what you'd measure. Keep doing safe work, such as diagnosis and measurement, while you wait. If the charter's steering notes already answer the question, follow them; don't ask.
+- **Also use `ask_human`** for resources beyond what the charter offers, and for anything risky or irreversible.
+- **Don't ask about routine science choices**: which tracker, which fit window, how many seeds. Make them, say why, and move on.
 
 ## Network and shutdown
 
