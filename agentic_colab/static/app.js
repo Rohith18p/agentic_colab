@@ -505,7 +505,7 @@ async function refreshCompute() {
   if (r && r.ok) compute = { via: "board", url: r.url, status: r.status, at: new Date().toISOString() };
   else {
     // The board's host may not reach the queue's machine; this browser often can.
-    const url = (r && r.url) || "http://100.111.167.68:8030";
+    const url = (r && r.url) || "http://board.tail0c526a.ts.net:8030";
     try {
       const ctl = new AbortController();
       setTimeout(() => ctl.abort(), 4000);
