@@ -152,6 +152,32 @@ def test_self_update_reports_runner_changes(tmp_path):
     assert self_update(clone) is False and (clone / "runner" / "x.py").read_text() == "local edit"
 
 
+def test_self_update_notices_runner_changes_someone_else_pulled(tmp_path):
+    import subprocess
+
+    from runner.claude_code import git_head, self_update
+
+    def git(cwd, *args):
+        subprocess.run(["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                       check=True, capture_output=True)
+
+    upstream, clone = tmp_path / "upstream", tmp_path / "clone"
+    (upstream / "runner").mkdir(parents=True)
+    git(upstream, "init", "-q", "-b", "main")
+    (upstream / "runner" / "x.py").write_text("print(1)")
+    git(upstream, "add", "-A")
+    git(upstream, "commit", "-q", "-m", "v1")
+    subprocess.run(["git", "clone", "-q", str(upstream), str(clone)], check=True)
+    loaded = git_head(clone)  # what a running agent's code came from
+
+    (upstream / "runner" / "x.py").write_text("print(2)")
+    git(upstream, "commit", "-q", "-am", "runner change")
+    git(clone, "pull", "-q", "--ff-only")  # e.g. start.sh pulling for a second agent
+    assert self_update(clone) is False  # the old check: nothing new to pull
+    assert self_update(clone, loaded) is True  # but this process still runs the old runner
+    assert self_update(clone, git_head(clone)) is False
+
+
 @pytest.mark.anyio
 async def test_swarm_end_stops_the_shift_and_the_runner(live_server, tmp_path, monkeypatch):
     from datetime import datetime, timedelta, timezone

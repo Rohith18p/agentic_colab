@@ -223,20 +223,30 @@ def describe_machine() -> str:
     return f"{host} · " + ", ".join(f"{n}x {gpu}" for gpu, n in gpus.items())
 
 
-def self_update(repo: Path) -> bool:
-    """Fast-forward the checkout. Returns True if files under runner/ changed."""
-    def git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=60)
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=60)
 
-    before = git("rev-parse", "HEAD").stdout.strip()
-    pulled = git("pull", "--ff-only", "-q")
+
+def git_head(repo: Path) -> str | None:
+    try:
+        return _git(repo, "rev-parse", "HEAD").stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def self_update(repo: Path, loaded: str | None = None) -> bool:
+    """Fast-forward the checkout. Returns True if files under runner/ differ from `loaded`, the commit
+    this process started from (default: HEAD before the pull). Comparing with `loaded` catches updates
+    that someone else pulled into a shared checkout, e.g. start.sh starting a second agent."""
+    before = git_head(repo)
+    pulled = _git(repo, "pull", "--ff-only", "-q")
     if pulled.returncode != 0:
         log.warning("auto-update: git pull failed, carrying on: %s", (pulled.stderr or pulled.stdout).strip()[:300])
+    after = git_head(repo)
+    before = loaded or before
+    if not before or not after or before == after:
         return False
-    after = git("rev-parse", "HEAD").stdout.strip()
-    if not before or before == after:
-        return False
-    changed = git("diff", "--name-only", before, after, "--", "runner/").stdout.split()
+    changed = _git(repo, "diff", "--name-only", before, after, "--", "runner/").stdout.split()
     log.info("auto-update: %s -> %s%s", before[:8], after[:8], f" (runner changed: {changed})" if changed else "")
     return bool(changed)
 
@@ -296,6 +306,7 @@ class ClaudeCodeAgent(Agent):
         self.state = HarnessState()
         self._announced_stop = False
         self._env_file_mtime: float | None = None
+        self._loaded_head: str | None = None  # commit this process's code came from (AUTO_UPDATE)
 
     @classmethod
     def from_env(cls) -> ClaudeCodeAgent:
@@ -364,6 +375,8 @@ class ClaudeCodeAgent(Agent):
     # ------------------------------------------------------------------ agent hooks
 
     async def setup(self, ctx: AgentContext) -> None:
+        if self.auto_update:
+            self._loaded_head = git_head(self.repo_root)
         wd = self.workdir(ctx.agent_name)
         (wd / "logs").mkdir(parents=True, exist_ok=True)
         notebook = wd / "NOTEBOOK.md"
@@ -414,7 +427,7 @@ class ClaudeCodeAgent(Agent):
         return None
 
     async def step(self, ctx: AgentContext) -> bool:
-        if self.auto_update and await anyio.to_thread.run_sync(self_update, self.repo_root):
+        if self.auto_update and await anyio.to_thread.run_sync(self_update, self.repo_root, self._loaded_head):
             log.info("%s: runner code changed; restarting the runner", ctx.agent_name)
             os.execv(sys.executable, [sys.executable, "-m", "runner"])
         self._reload_settings(ctx.agent_name)
