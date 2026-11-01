@@ -8,8 +8,8 @@
 # venv with the one runner dependency, then runs the agent until you stop it
 # (Ctrl-C). Run it inside tmux so it survives SSH disconnects:
 #   tmux new -s alice-1 'swarm/start_agent.sh http://board-box...:8000 alice-1 cosmos-gpu'
-# Optional overrides (env): AGENT_OWNER, AGENT_MODEL, STEP_SECONDS, SHIFT_BUDGET_USD,
-# TOTAL_BUDGET_USD, MAX_SHIFTS, AGENT_WORKDIR, AUTO_UPDATE (see runner/claude_code.py).
+# Optional overrides (env): AGENT_OWNER, AGENT_MODEL, STEP_SECONDS, MAX_SHIFTS, AGENT_WORKDIR,
+# AUTO_UPDATE (see runner/claude_code.py). There are no spend caps.
 #
 # Hot reload: the agent pulls this repo before every shift (AUTO_UPDATE=1) and
 # restarts itself if runner code changed; the playbook is re-read every shift;
@@ -80,7 +80,6 @@ fi
 
 export WORKSPACE_URL="$BOARD" AGENT_NAME="$NAME" AGENT_SKILLS="$SKILLS" RUNNER_AGENT=claude
 export AGENT_OWNER="${AGENT_OWNER:-$USER}"
-export STEP_SECONDS="${STEP_SECONDS:-120}" SHIFT_BUDGET_USD="${SHIFT_BUDGET_USD:-3}"
-export TOTAL_BUDGET_USD="${TOTAL_BUDGET_USD:-120}" AUTO_UPDATE="${AUTO_UPDATE:-1}" SWARM_END
+export STEP_SECONDS="${STEP_SECONDS:-120}" AUTO_UPDATE="${AUTO_UPDATE:-1}" SWARM_END
 echo "Starting $NAME (skills: ${SKILLS:-none}) against $BOARD. Work dir: ${AGENT_WORKDIR:-$HOME/swarm-work/$NAME}"
 exec env -u PYTHONPATH .venv/bin/python -m runner

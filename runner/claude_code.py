@@ -24,8 +24,9 @@ Environment (all optional except what the Runner needs):
   AGENT_PROMPT_FILE    playbook appended to the system prompt (default swarm/AGENT_PROMPT.md)
   AGENT_WORKDIR        persistent working directory (default ~/swarm-work/<AGENT_NAME>)
   AGENT_SKILLS         comma-separated machine capabilities, e.g. "cosmos-gpu,isaac-sim"
-  SHIFT_BUDGET_USD     spend cap per shift, passed as --max-budget-usd (default 3.00; Opus costs twice Sonnet per token)
-  TOTAL_BUDGET_USD     stop starting shifts after this much spend (default 120)
+  (No spend caps: shifts run until they finish or hit SHIFT_TIMEOUT_SECONDS. SHIFT_BUDGET_USD and
+  TOTAL_BUDGET_USD in the environment are ignored. The plan's usage limit is the only brake; see
+  LIMIT_BACKOFF_SECONDS.)
   MAX_SHIFTS           run this many shifts, then exit the runner (counted per start, so
                        MAX_SHIFTS=1 is a one-shift smoke test; default: no limit)
   SHIFT_TIMEOUT_SECONDS  stop a shift that runs longer than this (default 2700)
@@ -168,8 +169,6 @@ def parse_end(value: str | None) -> datetime | None:
 # Settings that agent.env may change between shifts: env name -> (attribute, parser).
 HOT_SETTINGS = {
     "AGENT_MODEL": ("model", str),
-    "SHIFT_BUDGET_USD": ("shift_budget_usd", float),
-    "TOTAL_BUDGET_USD": ("total_budget_usd", _optional(float)),
     "MAX_SHIFTS": ("max_shifts", _optional(int)),
     "SHIFT_TIMEOUT_SECONDS": ("shift_timeout_seconds", float),
     "PERMISSION_MODE": ("permission_mode", str),
@@ -261,8 +260,8 @@ class ClaudeCodeAgent(Agent):
         prompt_file: Path | str | None = None,
         workdir: Path | str | None = None,
         skills: list[str] | None = None,
-        shift_budget_usd: float = 3.0,
-        total_budget_usd: float | None = 120.0,
+        shift_budget_usd: float | None = None,
+        total_budget_usd: float | None = None,
         max_shifts: int | None = None,
         shift_timeout_seconds: float = 2700,
         permission_mode: str = "default",
@@ -320,8 +319,6 @@ class ClaudeCodeAgent(Agent):
             prompt_file=os.environ.get("AGENT_PROMPT_FILE") or None,
             workdir=os.environ.get("AGENT_WORKDIR") or None,
             skills=[s.strip() for s in os.environ.get("AGENT_SKILLS", "").split(",") if s.strip()],
-            shift_budget_usd=_env_float("SHIFT_BUDGET_USD", 3.0),
-            total_budget_usd=_env_float("TOTAL_BUDGET_USD", 120.0),
             max_shifts=int(max_shifts) if max_shifts else None,
             shift_timeout_seconds=_env_float("SHIFT_TIMEOUT_SECONDS", 2700),
             permission_mode=os.environ.get("PERMISSION_MODE", "default"),
@@ -528,7 +525,13 @@ class ClaudeCodeAgent(Agent):
             body = m["body"] if len(m["body"]) <= 1500 else m["body"][:1500] + " …[truncated]"
             lines.append(f"- [id {m['id']}] {where}, {m['author_name']} ({m['author_type']}, {m['type']}{reply}): {body}")
         messages = "\n".join(lines) if lines else "(none)"
-        total = f"${self.total_budget_usd:.2f}" if self.total_budget_usd is not None else "no limit"
+        if self.shift_budget_usd is None and self.total_budget_usd is None:
+            budget = (f"No spend cap: take the shift you need for one meaningful unit of work "
+                      f"(it is stopped after {self.shift_timeout_seconds / 60:.0f} min).")
+        else:
+            cap = f"at most ${self.shift_budget_usd:.2f}" if self.shift_budget_usd is not None else "no cap"
+            total = f"${self.total_budget_usd:.2f}" if self.total_budget_usd is not None else "no limit"
+            budget = f"Budget: {cap} this shift; ${self.state.spent_usd:.2f} spent so far of {total}."
         ending = (
             "Answer the new messages above as your playbook says, then end the shift."
             if self.on_mention else
@@ -539,7 +542,7 @@ class ClaudeCodeAgent(Agent):
 You are swarm agent `{ctx.agent_name}`, starting shift {number}. Time now: {now}.
 
 The board is the `{MCP_SERVER_NAME}` MCP server (tools named mcp__{MCP_SERVER_NAME}__*). Pass agent_name="{ctx.agent_name}" on every call that takes it.
-Budget: at most ${self.shift_budget_usd:.2f} this shift; ${self.state.spent_usd:.2f} spent so far of {total}.
+{budget}
 Your working directory persists between shifts: {self.workdir(ctx.agent_name)}
 Your notes from earlier shifts are in NOTEBOOK.md there.
 The swarm repo checkout (playbook, scripts such as scripts/board.py): {self.repo_root}
@@ -564,9 +567,9 @@ If you check read_inbox again during this shift, pass cursor={ctx.inbox_cursor}.
             "--output-format", "stream-json",
             "--verbose",
             "--model", self.model,
-            "--max-budget-usd", f"{self.shift_budget_usd:.2f}",
             "--permission-mode", self.permission_mode,
             "--allowedTools", self._allowed_tools(),
+            *([] if self.shift_budget_usd is None else ["--max-budget-usd", f"{self.shift_budget_usd:.2f}"]),
             "--disallowedTools", DISALLOWED_TOOLS,
             *self.extra_args,
         ]

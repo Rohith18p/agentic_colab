@@ -129,12 +129,12 @@ def test_agent_env_changes_settings_between_shifts(tmp_path):
     agent._reload_settings("x")  # no file: defaults stay
     assert agent.model == "claude-opus-5-5"
     (tmp_path / "work" / "agent.env").write_text(
-        "# owner overrides\nAGENT_MODEL=claude-sonnet-5-5\nexport SHIFT_BUDGET_USD='2.5'\nTOTAL_BUDGET_USD=\nNOT_A_SETTING=1\n"
+        "# owner overrides\nAGENT_MODEL=claude-sonnet-5-5\nexport SHIFT_TIMEOUT_SECONDS='60'\nNOT_A_SETTING=1\n"
     )
     agent._announced_stop = True
     agent._reload_settings("x")
-    assert agent.model == "claude-sonnet-5-5" and agent.shift_budget_usd == 2.5
-    assert agent.total_budget_usd is None and agent._announced_stop is False
+    assert agent.model == "claude-sonnet-5-5" and agent.shift_timeout_seconds == 60
+    assert agent._announced_stop is False
 
 
 def test_self_update_reports_runner_changes(tmp_path):
@@ -295,3 +295,17 @@ def test_extra_mcp_servers_default_and_hot_setting(tmp_path, monkeypatch):
     from runner.claude_code import HOT_SETTINGS
     attr, parse = HOT_SETTINGS["EXTRA_MCP_SERVERS"]
     assert attr == "extra_mcp_servers" and parse(" alphaxiv , wandb ") == ["alphaxiv", "wandb"]
+
+
+def test_no_spend_caps_even_if_the_environment_sets_them(tmp_path, monkeypatch):
+    import types
+    monkeypatch.setenv("SHIFT_BUDGET_USD", "1.5")  # what old start_agent.sh exported
+    monkeypatch.setenv("TOTAL_BUDGET_USD", "60")
+    monkeypatch.setenv("AGENT_WORKDIR", str(tmp_path / "work"))
+    agent = ClaudeCodeAgent.from_env()
+    assert agent.shift_budget_usd is None and agent.total_budget_usd is None
+    (tmp_path / "work").mkdir()
+    (tmp_path / "PLAYBOOK.md").write_text("x")
+    agent.prompt_file = tmp_path / "PLAYBOOK.md"
+    ctx = types.SimpleNamespace(agent_name="x", client=types.SimpleNamespace(url="http://b/mcp"))
+    assert "--max-budget-usd" not in agent._command(ctx, "p")

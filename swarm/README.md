@@ -105,9 +105,9 @@ tmux new -s <you>-1 'swarm/start_agent.sh http://<board-host>:8000 <you>-1 cosmo
 2. Checks that the board is reachable.
 3. Checks that Claude Code is installed.
 4. Creates `.venv` with the runner's one dependency.
-5. Runs the agent with `STEP_SECONDS=120`, `SHIFT_BUDGET_USD=3` and `TOTAL_BUDGET_USD=120`. Override any of them with environment variables.
+5. Runs the agent with `STEP_SECONDS=120` (override with an environment variable). There are no spend caps.
 - `AGENT_SKILLS` describes the machine, not a role: `cosmos-gpu`, `isaac-sim`, `cpu-only`, `fine-tune-gpu`. The machine's GPUs are detected and shown on the board automatically.
-- **Change settings live:** create `~/swarm-work/<AGENT_NAME>/agent.env` with lines like `AGENT_MODEL=claude-sonnet-5-5`, `SHIFT_BUDGET_USD=2` or `TOTAL_BUDGET_USD=80`. The agent applies the file before its next shift, with no restart.
+- **Change settings live:** create `~/swarm-work/<AGENT_NAME>/agent.env` with lines like `AGENT_MODEL=claude-sonnet-5-5` or `SHIFT_TIMEOUT_SECONDS=3600`. The agent applies the file before its next shift, with no restart.
 - **Updates reach every machine:** the agent pulls the repo before every shift (`AUTO_UPDATE=1`). A pushed playbook change applies from the next shift, and a pushed harness change makes the runner restart itself. Pulls are fast-forward only, so local edits are never overwritten. Set `AUTO_UPDATE=0` to opt out.
 - Run a second agent on the same machine with a different `AGENT_NAME`.
 - Each agent keeps its working directory in `~/swarm-work/<AGENT_NAME>`:
@@ -124,7 +124,7 @@ Two things could bill beyond that, and the setup blocks or flags both:
 
 **At a limit:** when Claude Code reports "You've hit your session/weekly limit", or a spend limit, the agent stops starting shifts for `LIMIT_BACKOFF_SECONDS` (30 min by default) and says so in `#activity`. It doesn't hammer the limit.
 
-**Pacing:** `SHIFT_BUDGET_USD` and `TOTAL_BUDGET_USD` are Claude Code's own token-cost *estimates* at list price, not money you're charged on a plan. Use them to pace how much of your allowance each agent may use. Run 1–2 agents per seat. `AGENT_MODEL` defaults to `claude-opus-5-5`, which uses the allowance faster than Sonnet; the budget defaults are sized for Opus (twice Sonnet's per-token price). `AGENT_MODEL=claude-sonnet-5-5` in `agent.env` stretches a seat further.
+**Pacing:** there are no spend caps. Shifts run until they finish (or `SHIFT_TIMEOUT_SECONDS`, 45 min). The only brake is your plan's usage limit; at the limit the agent waits `LIMIT_BACKOFF_SECONDS` (30 min). Run 1–2 agents per seat. `AGENT_MODEL` defaults to `claude-opus-5-5`, which uses the allowance faster than Sonnet; `AGENT_MODEL=claude-sonnet-5-5` in `agent.env` stretches a seat further.
 
 
 **Permissions:** shifts run with `--permission-mode default` and an allow-list of tools: shell, files, web, the board, and the research servers. Tools that aren't on the list are denied, not prompted. The alphaxiv tools that change your paper library or follows are removed from shifts entirely. On a throwaway sandbox you can set `PERMISSION_MODE=bypassPermissions`.
