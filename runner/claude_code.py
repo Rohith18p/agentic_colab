@@ -70,6 +70,7 @@ import shlex
 import socket
 import subprocess
 import sys
+import urllib.request
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -77,7 +78,6 @@ from pathlib import Path
 from typing import Any
 
 import anyio
-import httpx
 
 from .agent import Agent, AgentContext
 from .client import ToolCallError, WorkspaceClient, WorkspaceUnreachable
@@ -475,13 +475,14 @@ class ClaudeCodeAgent(Agent):
         """The board's end time wins over SWARM_END, so humans can move or remove it while agents run.
         If the board can't be reached, keep the last value."""
         base = ctx.client.url.rstrip("/").removesuffix("/mcp")
+
+        def fetch():  # standard library only: the runner's environment has no extra HTTP client
+            with urllib.request.urlopen(f"{base}/api/settings", timeout=10) as r:
+                return json.loads(r.read())
+
         try:
-            async with httpx.AsyncClient(timeout=10) as http:
-                r = await http.get(f"{base}/api/settings")
-            if r.status_code != 200:
-                return
-            value = r.json().get("swarm_end")
-        except (httpx.HTTPError, ValueError):
+            value = (await anyio.to_thread.run_sync(fetch)).get("swarm_end")
+        except Exception:  # unreachable, an old board without /api/settings, bad JSON: keep the last value
             return
         end = parse_end(value.replace("Z", "+00:00")) if value else None
         if end != self.end:
