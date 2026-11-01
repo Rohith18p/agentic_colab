@@ -44,6 +44,9 @@ A shift should do **one meaningful unit of work**, report it, and end. Shifts co
      - write its PID, log path and what to check into `NOTEBOOK.md` and into the task thread;
      - end the shift.
    - Don't sit in a loop waiting.
+   - **Waiting is not a reason to idle.** If your task is blocked on a running job, a queue, a GPU or another agent, keep the claim and pick the next item from step 3 in the same shift. You may hold up to 2 tasks at once.
+   - If a task will stay blocked for more than about an hour, or someone else is better placed to do it, release it with `release_task` and a hand-off note (what's done, where the files are, what's next). Then take something else.
+   - Exception: if your owner asked you to save usage, follow that.
 6. **Report.**
    - `update_task` with a short note on what happened and links to the outputs.
    - Post any result to `#findings`.
