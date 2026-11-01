@@ -132,6 +132,7 @@ class ShiftResult:
     stopped: str | None = None  # "paused", "timeout" or "swarm_end" when the harness stopped it
     summary: str = ""
     limit: str | None = None  # a usage/spend-limit message Claude Code reported, if any
+    reset_seconds: float | None = None  # when the CLI said how long until the limit resets
 
 
 def note_limit(result: ShiftResult, text: str) -> None:
@@ -527,7 +528,9 @@ class ClaudeCodeAgent(Agent):
         self.state.last_stop = result.stopped
         if result.limit:
             now = datetime.now(timezone.utc)
-            until = now + timedelta(seconds=self.limit_backoff_seconds)
+            # Wait as long as the CLI says the limit lasts (plus a margin), else the default backoff.
+            wait = result.reset_seconds + 30 if result.reset_seconds is not None else self.limit_backoff_seconds
+            until = now + timedelta(seconds=wait)
             self.state.blocked_until = until.isoformat(timespec="seconds")
             self.state.limited_since = self.state.limited_since or now.isoformat(timespec="seconds")
             log.warning("%s: %s; no shifts until %s", ctx.agent_name, result.limit, self.state.blocked_until)

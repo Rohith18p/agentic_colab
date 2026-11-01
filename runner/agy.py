@@ -33,8 +33,20 @@ from .claude_code import MCP_SERVER_NAME, ClaudeCodeAgent, ShiftResult
 log = logging.getLogger("runner.agy")
 
 DEFAULT_MODEL = "gemini-4-argon-low"
-# agy's own messages when a plan allowance or rate limit is hit.
-LIMIT_RE = re.compile(r"usage limit|rate limit|quota exceeded|too many requests|resource exhausted", re.IGNORECASE)
+# agy's own messages when a plan allowance or rate limit is hit, e.g. "RESOURCE_EXHAUSTED (code 429):
+# Individual quota reached. ... Resets in 3h0m34s."
+LIMIT_RE = re.compile(r"usage limit|rate limit|quota (?:exceeded|reached)|too many requests|resource[ _]exhausted",
+                      re.IGNORECASE)
+RESET_RE = re.compile(r"Resets in ((?:\d+h)?(?:\d+m)?(?:\d+s)?)", re.IGNORECASE)
+
+
+def reset_seconds(text: str) -> float | None:
+    """Seconds until the quota resets, from agy's "Resets in 3h0m34s", or None."""
+    m = RESET_RE.search(text)
+    if not m or not m.group(1):
+        return None
+    parts = dict((unit, int(n)) for n, unit in re.findall(r"(\d+)([hms])", m.group(1).lower()))
+    return parts.get("h", 0) * 3600 + parts.get("m", 0) * 60 + parts.get("s", 0)
 
 
 class AgyAgent(ClaudeCodeAgent):
@@ -129,3 +141,4 @@ class AgyAgent(ClaudeCodeAgent):
         match = LIMIT_RE.search(text)
         if match and result.limit is None:
             result.limit = f"agy {match.group(0)}"
+            result.reset_seconds = reset_seconds(text)

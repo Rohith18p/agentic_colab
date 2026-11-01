@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from datetime import datetime, timezone
 
 import anyio
 import pytest
@@ -39,7 +40,8 @@ step = lambda i, **kw: print(json.dumps({"event": "step_update", "step_update": 
 print(json.dumps({"event": "init", "init": {"model": "m"}}), flush=True)
 step(1, text_delta="looking around")
 if os.environ.get("FAKE_LIMIT"):
-    print(json.dumps({"event": "result", "result": {"status": "ERROR", "error": "RESOURCE_EXHAUSTED: quota exceeded"}}))
+    print(json.dumps({"event": "result", "result": {"status": "ERROR", "error": os.environ.get(
+        "FAKE_LIMIT_TEXT", "RESOURCE_EXHAUSTED: quota exceeded")}}))
     sys.exit(1)
 step(2, text_delta="did an agy thing")
 print(json.dumps({"event": "result", "result": {"status": "SUCCESS", "response": "did an agy thing"}}), flush=True)
@@ -145,8 +147,29 @@ async def test_agy_quota_error_backs_off(live_server, tmp_path, monkeypatch):
     agent = make(AgyAgent, tmp_path, monkeypatch, FAKE_AGY, "AGY_CMD")
     agent.mcp_config_path = tmp_path / "mcp_config.json"
     report, _ = await run_one_shift(live_server, agent, "agy-limit")
-    assert agent.state.blocked_until is not None and "agy quota exceeded" in report
+    assert agent.state.blocked_until is not None and "agy RESOURCE_EXHAUSTED" in report
     assert "looking around" in report  # the last thing it said before the error
+
+
+@pytest.mark.anyio
+async def test_agy_quota_reset_time_sets_the_backoff(live_server, tmp_path, monkeypatch):
+    # agy's real wording; the runner waits until the stated reset, not the default 30 minutes.
+    monkeypatch.setenv("FAKE_LIMIT", "1")
+    monkeypatch.setenv("FAKE_LIMIT_TEXT", "Individual quota reached. Please upgrade your subscription to increase "
+                                          "your limits. Resets in 3h0m34s.")
+    agent = make(AgyAgent, tmp_path, monkeypatch, FAKE_AGY, "AGY_CMD")
+    agent.mcp_config_path = tmp_path / "mcp_config.json"
+    report, _ = await run_one_shift(live_server, agent, "agy-reset")
+    assert "agy quota reached" in report or "usage limit" in report
+    wait = (datetime.fromisoformat(agent.state.blocked_until) - datetime.now(timezone.utc)).total_seconds()
+    assert 3 * 3600 < wait < 3 * 3600 + 120
+
+
+def test_agy_reset_parser():
+    from runner.agy import reset_seconds
+    assert reset_seconds("Resets in 33s.") == 33
+    assert reset_seconds("Resets in 163h1m47s.") == 163 * 3600 + 107
+    assert reset_seconds("no time given") is None
 
 
 def test_agy_leaves_an_unreadable_mcp_config_alone(tmp_path):
