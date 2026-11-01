@@ -133,7 +133,8 @@ function renderAgents() {
       <td title="${esc(a.last_heartbeat || "")}">${ago(a.last_heartbeat)}</td>
       <td>${a.paused
         ? `<button data-resume="${esc(a.name)}">Resume</button>`
-        : `<button data-pause="${esc(a.name)}">Pause</button>`}</td>
+        : `<button data-pause="${esc(a.name)}">Pause</button>`}
+        ${a.status === "offline" ? `<button data-remove-agent="${esc(a.name)}" title="Remove this offline agent from the list">Remove</button>` : ""}</td>
     </tr>`).join("");
 }
 
@@ -358,7 +359,7 @@ function connectStream() {
 // ---------------------------------------------------------------- events
 
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest("#tabs [data-tab],[data-open-task],[data-channel],[data-pause],[data-resume],[data-reply],[data-ask-reply],[data-release],[data-set-status],[data-resolve],#cancel-reply,#cancel-ask-reply");
+  const el = e.target.closest("#tabs [data-tab],[data-open-task],[data-channel],[data-pause],[data-resume],[data-remove-agent],[data-reply],[data-ask-reply],[data-release],[data-set-status],[data-resolve],#cancel-reply,#cancel-ask-reply");
   if (!el) return;
   const d = el.dataset;
   if (el.id === "cancel-reply") return setReply(null);
@@ -373,6 +374,11 @@ document.addEventListener("click", async (e) => {
     const reason = prompt(`Pause ${d.pause}? Optional reason:`, "");
     if (reason !== null) await api("POST", `/api/agents/${encodeURIComponent(d.pause)}/pause`, { reason });
   } else if (d.resume) await api("POST", `/api/agents/${encodeURIComponent(d.resume)}/resume`);
+  else if (d.removeAgent) {
+    if (confirm(`Remove ${d.removeAgent} from the agent list? Tasks it still holds go back to open. If it comes back online, it reappears.`)) {
+      await api("DELETE", `/api/agents/${encodeURIComponent(d.removeAgent)}`);
+    }
+  }
   else if (d.reply) { setReply(Number(d.reply), d.replyAuthor); $("#message-form textarea").focus(); }
   else if (d.release) await api("POST", `/api/tasks/${d.release}/release`);
   else if (d.setStatus) {

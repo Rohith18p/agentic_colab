@@ -386,6 +386,44 @@ class Workspace:
                 self._emit(s, by, "human", "agent.resumed", {"name": name})
             return self._agent_dict(agent)
 
+    def remove_agent(self, name: str, by: str, now: datetime | None = None) -> dict[str, Any]:
+        """A human removes an offline agent from the agent list. Tasks it still holds go back to open.
+
+        Only offline agents can be removed: an online one would just re-register on its next call.
+        If a removed agent does come back, it registers as new (the runner does this on `not_registered`).
+        """
+        now = now or utcnow()
+        with self._tx() as s:
+            agent = self._get_agent(s, name)
+            if not agent.is_offline(now, self.settings.offline_after_seconds):
+                raise WorkspaceError(
+                    "agent_online",
+                    f"Agent {name!r} is still online. Pause it, or stop its runner, and remove it once it shows offline.",
+                    status=409,
+                )
+            released = []
+            held = s.scalars(select(Task.id).where(Task.claimed_by == name, Task.status.in_(HELD_STATUSES))).all()
+            for task_id in held:
+                # Conditional, so a claim by someone else that lands meanwhile wins.
+                res = s.execute(
+                    update(Task)
+                    .where(Task.id == task_id, Task.claimed_by == name, Task.status.in_(HELD_STATUSES))
+                    .values(status="open", claimed_by=None, lease_expires_at=None, updated_at=now)
+                    .execution_options(synchronize_session=False)
+                )
+                if res.rowcount != 1:
+                    continue
+                released.append(task_id)
+                self._post(
+                    s, author=by, author_type="human", type_="status", task_id=task_id, now=now,
+                    body=f"Agent {name} was removed by {by}; task returned to open.",
+                )
+            info = self._agent_dict(agent, now)
+            s.delete(agent)
+            s.flush()
+            self._emit(s, by, "human", "agent.removed", {"name": name, "released_tasks": released})
+            return {"removed": info, "released_tasks": released}
+
     # ------------------------------------------------------------------ messages
 
     def post_message(

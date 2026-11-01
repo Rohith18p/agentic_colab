@@ -59,3 +59,14 @@ def test_charter_replace_edits_one_field(live_server):
     out = subprocess.run([sys.executable, str(SCRIPT), "--url", live_server.url, "--as", "x", "charter-replace",
                           "compute", "not there", "y"], capture_output=True, text=True)
     assert out.returncode != 0 and ws.read_charter()["version"] == charter["version"]
+
+
+def test_cli_removes_an_offline_agent(live_server):
+    from datetime import timedelta
+
+    from agentic_colab.models import utcnow
+
+    ws = live_server.ws
+    ws.register_agent("old-1", now=utcnow() - timedelta(hours=1))
+    assert "removed old-1" in run(live_server.url, "remove-agent", "old-1")
+    assert "old-1" not in [a["name"] for a in ws.list_agents()]

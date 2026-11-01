@@ -84,3 +84,36 @@ async def test_pause_stops_runner_and_resume_lets_it_continue(live_server):
         )
         assert ws.get_task(task["id"])["claimed_by"] == "echo-1"
         runner.stop()
+
+
+
+def test_remove_offline_agent_releases_its_tasks(ws):
+    from datetime import timedelta
+
+    from agentic_colab.models import utcnow
+
+    t0 = utcnow()
+    ws.register_agent("gone", now=t0)
+    ws.register_agent("here", now=t0)
+    task = ws.create_task("alice", "human", "t")
+    ws.claim_task("gone", task["id"], now=t0)
+
+    # Online agents can't be removed: they would just re-register.
+    with pytest.raises(WorkspaceError) as err:
+        ws.remove_agent("gone", by="alice", now=t0)
+    assert err.value.code == "agent_online"
+
+    later = t0 + timedelta(seconds=61)
+    ws.heartbeat("here", now=later)
+    res = ws.remove_agent("gone", by="alice", now=later)
+    assert res["released_tasks"] == [task["id"]]
+    assert [a["name"] for a in ws.list_agents(now=later)] == ["here"]
+    reopened = ws.get_task(task["id"])
+    assert reopened["status"] == "open" and reopened["claimed_by"] is None
+    assert ws.list_events()[-1]["type"] == "agent.removed"
+
+    with pytest.raises(WorkspaceError) as err:
+        ws.remove_agent("gone", by="alice", now=later)
+    assert err.value.code == "not_registered"
+    # If it comes back, it registers as new.
+    assert ws.register_agent("gone", now=later)["agent"]["name"] == "gone"

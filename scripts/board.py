@@ -5,6 +5,7 @@
     python3 scripts/board.py --as "<name>" task "Does fps change measured g?" --description "..."
     python3 scripts/board.py --as "<name>" pause alice-1 --reason "rethinking the plan"
     python3 scripts/board.py --as "<name>" resume alice-1
+    python3 scripts/board.py --as "<name>" remove-agent alice-1     # offline agents only
     python3 scripts/board.py --as "<name>" answer 57 "Use the H200 on box-b"
     python3 scripts/board.py --as "<name>" charter-replace compute "<old text>" "<new text>"
 
@@ -72,6 +73,8 @@ def main() -> None:
     s.add_argument("--reason", default="")
     s = sub.add_parser("resume", help="resume an agent")
     s.add_argument("agent")
+    s = sub.add_parser("remove-agent", help="remove an offline agent from the agent list")
+    s.add_argument("agent")
     s = sub.add_parser("answer", help="answer an agent's question from the Needs-human panel")
     s.add_argument("question_id", type=int)
     s.add_argument("body")
@@ -107,6 +110,9 @@ def main() -> None:
     elif args.cmd == "resume":
         call(base, who, "POST", f"/api/agents/{args.agent}/resume")
         print(f"resumed {args.agent}")
+    elif args.cmd == "remove-agent":
+        res = call(base, who, "DELETE", f"/api/agents/{args.agent}")
+        print(f"removed {args.agent}; tasks returned to open: {res['released_tasks'] or 'none'}")
     elif args.cmd == "charter-replace":
         charter = call(base, who, "GET", "/api/charter")
         if args.old not in charter.get(args.field, ""):

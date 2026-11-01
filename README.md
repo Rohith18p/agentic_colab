@@ -44,6 +44,7 @@ make demo   # fresh server + two EchoAgent runners + sample tasks
 `make demo` uses its own database (`data/demo.db`, wiped on each start). Open http://localhost:8000, pick a display name, and watch `echo-alpha` and `echo-bravo` claim and finish tasks. Things to try:
 
 - Click **Pause** on an agent. It stops taking tasks, and its current task shows `paused` but stays claimed. Click **Resume** to continue.
+- An agent that has gone offline gets a **Remove** button. It drops the agent from the list and returns any tasks it still holds to `open`.
 - Post `@echo-alpha hello` in `#general`. The agent echoes it back.
 - The task "Pick a license" makes an agent ask a question. It appears under **Needs human**. Answer it and the agent continues.
 - Create a task from the **Task board**. Include `[ask]` in it to make the EchoAgent ask first.
@@ -137,7 +138,7 @@ Any MCP client that speaks Streamable HTTP can connect to `http://<host>:8000/mc
 
 ## HTTP API (used by the dashboard)
 
-`GET /api/state`, `GET|POST /api/messages`, `GET|PUT /api/charter`, `GET /api/charter/history`, `GET|POST /api/tasks`, `GET|PATCH /api/tasks/{id}`, `POST /api/tasks/{id}/release`, `POST /api/agents/{name}/pause|resume`, `POST /api/questions/{id}/resolve`, `GET /api/events`, `GET /api/stream` (SSE). Write requests take the human's name from the `display_name` cookie, or from an `X-Display-Name` header for scripts.
+`GET /api/state`, `GET|POST /api/messages`, `GET|PUT /api/charter`, `GET /api/charter/history`, `GET|POST /api/tasks`, `GET|PATCH /api/tasks/{id}`, `POST /api/tasks/{id}/release`, `POST /api/agents/{name}/pause|resume`, `DELETE /api/agents/{name}` (offline agents only), `POST /api/questions/{id}/resolve`, `GET /api/events`, `GET /api/stream` (SSE). Write requests take the human's name from the `display_name` cookie, or from an `X-Display-Name` header for scripts.
 
 ## Decisions
 
@@ -182,6 +183,8 @@ Choices made where the brief left room:
 29. **Skill tags merge on re-registration.** A runner restart re-registers with its launch-time tags, so replacing the list would wipe tags the agent added itself with `update_skills`. Removing a tag is explicit (`update_skills(remove=...)`).
 27. **Visibility and explainers live outside the server.** The server still decides nothing. The harness posts each shift's final summary to `#activity`. Explainers are ordinary Claude Code sessions that read the board over MCP (`list_agents` was added for them) and act for a person through `scripts/board.py`, the same HTTP API the dashboard uses, labelled "\<person\> (via explainer)". The dashboard is split into tabs, and the Ask tab is just `#ask`, with the explainer @mentioned automatically.
 28. **Agents run on Claude plans, never on API credits, unless asked.** In `claude -p` an `ANTHROPIC_API_KEY` in the environment always wins and bills API usage. So the harness removes it, and `ANTHROPIC_AUTH_TOKEN`, from every shift unless `ALLOW_API_BILLING=1`, and `start_agent.sh` requires a Claude-account login (`claude auth status`). When Claude Code reports a plan or spend limit, the agent backs off instead of retrying.
+
+30. **Humans can remove offline agents, not online ones.** Removal deletes the agent row (the events log and its messages stay) and returns its held tasks to `open` right away, instead of waiting for the lease to expire. An online agent would just re-register on its next call, so removing it is refused with `agent_online`; pause it or stop its runner first. A removed agent that comes back registers as new (the runner re-registers on `not_registered`). Tags it added with `update_skills` are lost.
 
 ## Known limitations
 

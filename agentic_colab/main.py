@@ -145,6 +145,10 @@ def build_api(ws: Workspace, boot_id: str) -> APIRouter:
     async def resume(name: str, request: Request):
         return await run(ws.resume_agent, name, human_name(request))
 
+    @api.delete("/agents/{name}")
+    async def remove_agent(name: str, request: Request):
+        return await run(ws.remove_agent, name, human_name(request))
+
     @api.get("/events")
     async def events(after_id: int = 0, limit: int = 200):
         return await run(ws.list_events, after_id=after_id, limit=limit)
