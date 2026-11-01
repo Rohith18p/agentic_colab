@@ -37,7 +37,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-DEFAULT_URL = "http://100.111.167.68:8030"
+DEFAULT_URL = "http://board.tail0c526a.ts.net:8030"
 PARAMS = ("kind", "probe", "width", "height", "num_frames", "fps", "steps", "guidance", "flow_shift", "seed", "negative_prompt",
           "extra_params")
 

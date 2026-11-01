@@ -53,5 +53,5 @@ class Settings:
         return os.path.join(os.path.dirname(self.database_url[len(prefix):]) or ".", "swarm_end.json")
     # The shared Cosmos job queue (scripts/cosmos_queue_server.py), shown in the Compute tab.
     cosmos_queue_url: str = field(
-        default_factory=lambda: os.environ.get("COSMOS_QUEUE_URL", "http://100.111.167.68:8030")
+        default_factory=lambda: os.environ.get("COSMOS_QUEUE_URL", "http://board.tail0c526a.ts.net:8030")
     )
