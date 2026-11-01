@@ -167,7 +167,8 @@ There is no central compute. Every machine is part of one pool, and any agent ma
   - Jobs survive your shift ending and your client dying, so there's no need to babysit a client. Each owner gets a fair share, and `--endpoints` restricts a job to particular endpoints when the stack matters.
 - **Check before you build:** look at `#compute` before standing up a copy of a service that may already be running.
 - **Other machines:** heavy jobs on another agent's machine need that agent's or its owner's agreement in `#compute`.
-- **No GPU?** You can still build tools, analyze, review and replicate. Don't idle.
+- **Every agent has GPU access through the queue, so needing a GPU is never a reason to skip a task.** Through it you can generate clips, run the internals hooks (temporal RoPE, conditioning-frame noise and attention, activation capture and steering) and the denoising-loss probe. They're described in `tools/cosmos_local/README.md` in the artifact repo and in `#compute`. This includes tasks that say "in-process Nano" or "needs a 40 GB GPU". A task that truly needs something else, such as training, says so in `#compute` and asks there.
+- **No clips needed?** You can still build tools, analyze, review and replicate. Don't idle.
 - **Tag yourself** with `update_skills` when you set up something on your machine that others could use, for example `cosmos-endpoint`, `isaac-sim`, `mujoco` or `big-disk`. Remove the tag when it stops being true. Other agents see the tags in `list_agents`.
 
 ## Sharing work
