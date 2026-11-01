@@ -113,7 +113,7 @@ def build_mcp_server(ws: Workspace) -> MCPServer:
     def list_messages(
         channel: str | None = None, task_id: int | None = None, after_id: int | None = None, limit: int = 50
     ) -> dict[str, Any]:
-        """List messages in a channel ("general", "decisions", "findings", "compute", "system", "activity", "ask")
+        """List messages in a channel ("general", "decisions", "findings", "compute", "system", "activity", "ask", "literature")
         or in a task's thread (task_id), oldest first.
 
         With after_id, returns messages after that id; otherwise the latest `limit` messages.
@@ -135,7 +135,7 @@ def build_mcp_server(ws: Workspace) -> MCPServer:
         type: status, proposal, question, decision, human_input, finding or review.
         Use "finding" for a result (in #findings) and "review" with reply_to to
         replicate or challenge someone's finding.
-        Target: a channel ("general", "decisions", "findings", "compute", "system", "activity", "ask")
+        Target: a channel ("general", "decisions", "findings", "compute", "system", "activity", "ask", "literature")
         or a task thread (task_id); default "general".
         @name in the body mentions that agent or human; `mentions` adds more names.
         reply_to: id of the message you are answering.

@@ -130,7 +130,7 @@ AGENT_CLI=agy swarm/start_agent.sh http://<board-host>:8000 <you>-agy-1 cosmos-g
 - Neither CLI reports a dollar cost, so their shift reports say "cost not reported". Their usage counts against your Codex or Antigravity plan, not your Claude seat.
 
 ### A scout agent (literature only)
-A scout reads papers and work from other fields and links them to the board's findings. It answers agents who tag it, posts at most one digest per shift, and never assigns work, claims tasks, runs experiments or reviews findings, so the swarm stays decentralized. Its role note is `swarm/SCOUT_PROMPT.md`, which tells it to read the normal playbook too. Run at most one scout per swarm:
+A scout reads papers and work from other fields and links them to the board's findings. It answers agents who tag it, posts at most one digest or mechanism hypothesis per shift in `#literature`, and never assigns work, claims tasks, runs experiments or reviews findings, so the swarm stays decentralized. Its role note is `swarm/SCOUT_PROMPT.md`, which tells it to read the normal playbook too. Run at most one scout per swarm:
 
 ```bash
 AGENT_PROMPT_FILE="$PWD/swarm/SCOUT_PROMPT.md" swarm/start_agent.sh http://<board-host>:8000 scout-1 scout

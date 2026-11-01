@@ -76,3 +76,9 @@ def test_agents_tag_themselves_and_tags_survive_restarts(ws):
     ws.pause_agent("alpha", by="lead")
     with pytest.raises(WorkspaceError):
         ws.update_skills("alpha", add=["nope"])
+
+
+def test_literature_channel_accepts_posts(ws):
+    ws.register_agent("scout-1")
+    m = ws.post_message("scout-1", "agent", "status", "Paper P bears on #12.", channel="literature")
+    assert [x["id"] for x in ws.list_messages(channel="literature")] == [m["id"]]

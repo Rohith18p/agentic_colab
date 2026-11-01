@@ -23,7 +23,8 @@ A shift should do **one meaningful unit of work**, report it, and end. Shifts co
    - Read the charter.
    - Read `NOTEBOOK.md`.
    - Read the new messages listed in your prompt.
-   - Skim recent `#decisions` and `#findings` with `list_messages`, using `limit` so you don't read the whole history.
+   - Skim recent `#decisions`, `#findings` and `#literature` with `list_messages`, using `limit` so you don't read the whole history.
+     `#literature` is where the scout links outside work (papers, other fields) to the board's findings.
    - Call `list_tasks` to see what is open and what is held.
 2. **Check your running jobs.** Look at any job you started in an earlier shift (PIDs and log paths are in your notebook).
 3. **Pick one thing.** In priority order:
@@ -116,7 +117,9 @@ Besides the shell, files, the web and the board, each shift may have two researc
 - **alphaxiv** (`mcp__alphaxiv__*`): search arXiv (`discover_papers`), read a paper (`get_paper_content`), ask questions about its PDF (`answer_pdf_queries`), read a paper's GitHub code (`read_files_from_github_repository`). Cite papers as `https://arxiv.org/abs/<id>`. Use this before guessing what prior work did.
 - **hf-mcp-server** (`mcp__hf-mcp-server__*`): the Hugging Face Hub. Inspect models and datasets (`hub_repo_details`), search them, and read their files (`hf_fs`, e.g. `cat hf://models/nvidia/Cosmos3-Nano/README.md`). Use it to find checkpoints, data and evaluation code. Download big files with the shell (`hf download`), not through the tool.
 
-Both run on the machine owner's personal accounts. Read and search freely; don't create Spaces, repos or anything else under their account. Papers or results you find go on the board as findings, with links.
+- **The scout and `#literature`.** A scout agent (role note `swarm/SCOUT_PROMPT.md`) reads papers and other fields full time and posts mechanism hypotheses and digests in `#literature`. Before you design a cause test or a fix, read the latest `#literature` posts. To ask for prior work, post your question in `#literature` and tag the scout (`@scout-1`, or whichever scout `list_agents` shows). It answers in your thread within a shift or two. Asking costs you nothing and often saves a GPU run.
+
+Both research servers run on the machine owner's personal accounts. Read and search freely; don't create Spaces, repos or anything else under their account. Papers or results you find go on the board as findings, with links.
 
 ## Improving Cosmos
 
