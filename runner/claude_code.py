@@ -54,6 +54,7 @@ Environment (all optional except what the Runner needs):
                        bills API credits. In `claude -p`, a key in the environment always wins.
   LIMIT_BACKOFF_SECONDS  after a plan usage-limit or spend-limit error, wait this long before the
                        next shift instead of retrying (default 1800)
+  RATE_LIMIT_BACKOFF_SECONDS  wait after a short request-rate limit (default 300 s; usage limits wait LIMIT_BACKOFF_SECONDS)
   LIMIT_RELEASE_SECONDS  when usage limits will keep the agent from working for at least this long
                        (counting the current backoff), it releases its claimed tasks with a hand-off
                        note so others can take them (default 1800, so the first limit releases;
@@ -135,6 +136,14 @@ class ShiftResult:
     summary: str = ""
     limit: str | None = None  # a usage/spend-limit message Claude Code reported, if any
     reset_seconds: float | None = None  # when the CLI said how long until the limit resets
+
+
+def is_rate_limit(limit: str) -> bool:
+    """A per-minute request-rate limit (e.g. "Codex rate limit", "too many requests") clears in minutes,
+    unlike a used-up plan allowance ("usage limit", "5-hour limit", "quota reached")."""
+    text = limit.lower()
+    return ("rate limit" in text or "too many requests" in text) and not any(
+        w in text for w in ("usage", "quota", "hour", "weekly", "spend", "budget"))
 
 
 def note_limit(result: ShiftResult, text: str) -> None:
@@ -303,6 +312,7 @@ class ClaudeCodeAgent(Agent):
         shift_reports: bool = True,
         allow_api_billing: bool = False,
         limit_backoff_seconds: float = 1800,
+        rate_limit_backoff_seconds: float = 300,
         limit_release_seconds: float = 1800,
         extra_mcp_servers: list[str] | None = None,
         claude_config: Path | str | None = None,
@@ -328,6 +338,7 @@ class ClaudeCodeAgent(Agent):
         self.shift_reports = shift_reports
         self.allow_api_billing = allow_api_billing
         self.limit_backoff_seconds = limit_backoff_seconds
+        self.rate_limit_backoff_seconds = rate_limit_backoff_seconds
         self.limit_release_seconds = limit_release_seconds
         self.extra_mcp_servers = _names(DEFAULT_EXTRA_MCP) if extra_mcp_servers is None else list(extra_mcp_servers)
         self.claude_config = Path(claude_config) if claude_config else claude_config_file()
@@ -363,6 +374,7 @@ class ClaudeCodeAgent(Agent):
             shift_reports=os.environ.get("SHIFT_REPORTS", "1") != "0",
             allow_api_billing=os.environ.get("ALLOW_API_BILLING") == "1",
             limit_backoff_seconds=_env_float("LIMIT_BACKOFF_SECONDS", 1800),
+            rate_limit_backoff_seconds=_env_float("RATE_LIMIT_BACKOFF_SECONDS", 300),
             limit_release_seconds=_env_float("LIMIT_RELEASE_SECONDS", 1800),
             extra_mcp_servers=_names(os.environ.get("EXTRA_MCP_SERVERS", DEFAULT_EXTRA_MCP)),
             effort=os.environ.get("AGENT_EFFORT") or None,
@@ -551,7 +563,12 @@ class ClaudeCodeAgent(Agent):
         if result.limit:
             now = datetime.now(timezone.utc)
             # Wait as long as the CLI says the limit lasts (plus a margin), else the default backoff.
-            wait = result.reset_seconds + 30 if result.reset_seconds is not None else self.limit_backoff_seconds
+            if result.reset_seconds is not None:
+                wait = result.reset_seconds + 30
+            elif is_rate_limit(result.limit):
+                wait = self.rate_limit_backoff_seconds  # a short request-rate limit, not a used-up allowance
+            else:
+                wait = self.limit_backoff_seconds
             until = now + timedelta(seconds=wait)
             self.state.blocked_until = until.isoformat(timespec="seconds")
             self.state.limited_since = self.state.limited_since or now.isoformat(timespec="seconds")

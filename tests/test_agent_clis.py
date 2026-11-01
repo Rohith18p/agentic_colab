@@ -213,3 +213,10 @@ async def test_limit_release_can_be_turned_off(live_server, tmp_path, monkeypatc
     agent = make(CodexAgent, tmp_path, monkeypatch, FAKE_CODEX, "CODEX_CMD")
     await run_one_shift(live_server, agent, "cx-keep")
     assert next(t for t in ws.list_tasks() if t["id"] == held["id"])["claimed_by"] == "cx-keep"
+
+
+def test_rate_limits_wait_minutes_and_usage_limits_wait_longer():
+    from runner.claude_code import is_rate_limit
+    assert is_rate_limit("Codex rate limit") and is_rate_limit("agy too many requests")
+    for usage in ("Codex usage limit", "You've hit your 5-hour limit", "agy quota reached", "agy RESOURCE_EXHAUSTED"):
+        assert not is_rate_limit(usage)
