@@ -43,6 +43,14 @@ class Settings:
     # After this time agents can no longer change anything (reads still work, humans
     # can still post). Set SWARM_END to the freeze, e.g. 2026-11-01T08:00:00-05:00.
     swarm_end: datetime | None = field(default_factory=lambda: parse_end(os.environ.get("SWARM_END")))
+
+    def end_override_path(self) -> str | None:
+        """Where a human's change to the end time is kept (next to a SQLite database), so it survives restarts
+        and beats SWARM_END from the environment. None for other databases."""
+        prefix = "sqlite:///"
+        if not self.database_url.startswith(prefix):
+            return None
+        return os.path.join(os.path.dirname(self.database_url[len(prefix):]) or ".", "swarm_end.json")
     # The shared Cosmos job queue (scripts/cosmos_queue_server.py), shown in the Compute tab.
     cosmos_queue_url: str = field(
         default_factory=lambda: os.environ.get("COSMOS_QUEUE_URL", "http://100.111.167.68:8030")

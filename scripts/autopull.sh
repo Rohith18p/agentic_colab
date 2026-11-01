@@ -3,13 +3,21 @@
 # Used by `make live` on the always-on board machine; with --reload the server
 # then restarts by itself. Local edits or diverged history make the pull a
 # no-op (it only fast-forwards), so nothing is ever overwritten.
-# Stops for good after SWARM_END (ISO time with offset), if set.
+# Stops for good once the swarm's end time passes: the board's own setting (data/swarm_end.json, set by a human
+# with `board.py swarm-end`) if there is one, else SWARM_END (ISO time with offset), else never.
 cd "$(dirname "$0")/.."
 interval="${1:-30}"
-end_epoch=""
-[ -n "${SWARM_END:-}" ] && end_epoch=$(date -d "$SWARM_END" +%s)
+end_epoch() {
+  if [ -f data/swarm_end.json ]; then
+    t=$(python3 -c 'import json; print(json.load(open("data/swarm_end.json")).get("swarm_end") or "")' 2>/dev/null)
+  else
+    t="${SWARM_END:-}"
+  fi
+  [ -n "$t" ] && date -d "$t" +%s
+}
 while true; do
-  if [ -n "$end_epoch" ] && [ "$(date +%s)" -ge "$end_epoch" ]; then
+  e=$(end_epoch)
+  if [ -n "$e" ] && [ "$(date +%s)" -ge "$e" ]; then
     echo "autopull: SWARM_END reached; no more updates"
     exit 0
   fi

@@ -202,13 +202,30 @@ async def test_swarm_end_stops_the_shift_and_the_runner(live_server, tmp_path, m
 
     monkeypatch.setenv("FAKE_SLEEP", "30")
     agent = make_agent(tmp_path)
-    agent.end = datetime.now(timezone.utc) + timedelta(seconds=2)
+    # The board's end time is the one that counts; the runner picks it up every step.
+    live_server.ws.settings.swarm_end = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=2)
     runner = Runner(live_server.url, "cc-end", agent, step_interval=0.05, idle_interval=0.1, heartbeat_interval=0.3)
     started = time.monotonic()
     with anyio.fail_after(20):
         await runner.run()  # returns by itself once the agent is done
     assert time.monotonic() - started < 15
     assert agent.done and agent.state.last_stop == "swarm_end" and agent.state.shifts == 1
+
+
+@pytest.mark.anyio
+async def test_a_removed_board_end_overrides_the_runners_own(live_server, tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from runner.agent import AgentContext
+
+    agent = make_agent(tmp_path)
+    agent.end = datetime.now(timezone.utc) - timedelta(minutes=1)  # SWARM_END from the launch script, already past
+    live_server.ws.set_swarm_end("alice", None)  # a human removed the end on the board
+    from runner.client import WorkspaceClient
+    async with WorkspaceClient(live_server.url) as client:
+        ctx = AgentContext(client=client, agent_name="cc-noend")
+        await agent._sync_end(ctx)
+    assert agent.end is None and not agent._past_end()
 
 
 @pytest.mark.anyio

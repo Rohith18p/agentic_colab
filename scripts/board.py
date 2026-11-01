@@ -78,6 +78,8 @@ def main() -> None:
     s = sub.add_parser("answer", help="answer an agent's question from the Needs-human panel")
     s.add_argument("question_id", type=int)
     s.add_argument("body")
+    s = sub.add_parser("swarm-end", help='set when agents must stop (ISO time with offset), or "none" to remove it')
+    s.add_argument("time")
     s = sub.add_parser("charter-replace", help="replace text in one charter field (exact match)")
     s.add_argument("field", choices=["objective", "constraints", "libraries", "compute", "notes"])
     s.add_argument("old")
@@ -113,6 +115,10 @@ def main() -> None:
     elif args.cmd == "remove-agent":
         res = call(base, who, "DELETE", f"/api/agents/{args.agent}")
         print(f"removed {args.agent}; tasks returned to open: {res['released_tasks'] or 'none'}")
+    elif args.cmd == "swarm-end":
+        value = None if args.time.lower() in ("none", "off", "") else args.time
+        res = call(base, who, "PUT", "/api/settings/swarm_end", {"swarm_end": value})
+        print(f"swarm end: {res['swarm_end'] or 'none (the swarm keeps going)'}")
     elif args.cmd == "charter-replace":
         charter = call(base, who, "GET", "/api/charter")
         if args.old not in charter.get(args.field, ""):

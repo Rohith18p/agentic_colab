@@ -18,7 +18,7 @@
 # Hot reload: the agent pulls this repo before every shift (AUTO_UPDATE=1) and
 # restarts itself if runner code changed; the playbook is re-read every shift;
 # ~/swarm-work/<name>/agent.env (KEY=VALUE) changes the model or budgets live.
-# Requires SWARM_END (the agent stops for good then) and runs swarm/check_security.sh first.
+# Runs swarm/check_security.sh first. The board decides when the swarm ends (SWARM_END is only a fallback).
 set -euo pipefail
 
 BOARD="${1:?usage: swarm/start_agent.sh <board-url> <agent-name> [skills]}"
@@ -32,11 +32,7 @@ case "$CLI" in
   *) echo "AGENT_CLI must be claude, codex or agy (got: $CLI)."; exit 1 ;;
 esac
 
-if [ -z "${SWARM_END:-}" ]; then
-  echo "Set SWARM_END first (the time the swarm stops for good), e.g.:"
-  echo "  export SWARM_END=2026-11-01T08:00:00-05:00"
-  exit 1
-fi
+# SWARM_END is optional: the board's end time (set by humans with `board.py swarm-end`) wins every step.
 if [ "${SKIP_SECURITY_CHECK:-0}" != "1" ] && ! swarm/check_security.sh "$BOARD"; then
   echo "Not starting: fix the failed checks above (or SKIP_SECURITY_CHECK=1 for a local test only)."
   exit 1

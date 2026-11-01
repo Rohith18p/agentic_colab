@@ -69,7 +69,7 @@ fi
 
 echo "End time"
 if [ -z "${SWARM_END:-}" ]; then
-  fail "SWARM_END is not set; export it, e.g. SWARM_END=2026-11-01T08:00:00-05:00"
+  ok "SWARM_END is not set: the board's end time applies (humans set or remove it with board.py swarm-end)"
 else
   end=$(date -d "$SWARM_END" +%s 2>/dev/null || echo "")
   if [ -z "$end" ]; then fail "SWARM_END=$SWARM_END is not a valid time"

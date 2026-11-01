@@ -62,6 +62,10 @@ class PauseIn(BaseModel):
     reason: str = ""
 
 
+class SwarmEndIn(BaseModel):
+    swarm_end: str | None = None  # ISO time with an offset, or null/"" for no end
+
+
 def human_name(request: Request) -> str:
     """The human's display name, from the cookie the dashboard sets on first visit."""
     name = unquote(request.cookies.get(NAME_COOKIE, "") or request.headers.get("x-display-name", "")).strip()
@@ -90,6 +94,15 @@ def build_api(ws: Workspace, boot_id: str) -> APIRouter:
                        before_id: int | None = None, limit: int = 100):
         return await run(ws.list_messages, channel=channel, task_id=task_id, after_id=after_id,
                          before_id=before_id, limit=limit)
+
+    @api.get("/settings")
+    async def settings():
+        """The small part of /api/state that runners poll every step (the swarm end time)."""
+        return (await run(ws.snapshot))["settings"]
+
+    @api.put("/settings/swarm_end")
+    async def set_swarm_end(body: SwarmEndIn, request: Request):
+        return await run(ws.set_swarm_end, human_name(request), body.swarm_end)
 
     @api.get("/messages/{message_id}")
     async def get_message(message_id: int):

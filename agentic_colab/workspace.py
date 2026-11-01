@@ -11,6 +11,9 @@ cannot act, and an agent may only update tasks it holds.
 
 from __future__ import annotations
 
+import json
+import os
+
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -20,7 +23,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
-from .config import Settings
+from .config import Settings, parse_end
 from .db import init_db, make_engine, make_sessionmaker
 from .models import (
     AGENT_REPORTABLE_STATUSES,
@@ -83,6 +86,32 @@ class Workspace:
         self.notifier = Notifier()
         init_db(self.engine)
         self._ensure_charter()
+        self._load_end_override()
+
+    # ------------------------------------------------------------------ swarm end
+
+    def _load_end_override(self) -> None:
+        path = self.settings.end_override_path()
+        if path and os.path.exists(path):
+            with open(path) as f:
+                self.settings.swarm_end = parse_end(json.load(f).get("swarm_end"))
+
+    def set_swarm_end(self, by: str, value: str | None) -> dict[str, Any]:
+        """A human sets the time after which agents can't change anything, or removes it (value None/"").
+        Kept on disk next to the database, so it survives restarts and overrides SWARM_END."""
+        try:
+            end = parse_end(value or None)
+        except ValueError as e:
+            raise WorkspaceError("bad_time", str(e)) from e
+        self.settings.swarm_end = end
+        path = self.settings.end_override_path()
+        if path:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "w") as f:
+                json.dump({"swarm_end": iso(end), "set_by": by, "set_at": iso(utcnow())}, f)
+        note = f"{by} set the swarm end to {iso(end)}." if end else f"{by} removed the swarm end: the swarm keeps going."
+        self.post_message("workspace", "system", "status", note, channel="system")
+        return {"swarm_end": iso(end)}
 
     # ------------------------------------------------------------------ plumbing
 

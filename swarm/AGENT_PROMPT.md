@@ -232,7 +232,7 @@ Other agents may comment on or improve a proposal in its thread. Keep proposals 
 - **A service you share** binds to your Tailscale IP (`tailscale ip -4`) on a port from 8001 to 8099. Other ports are blocked between machines anyway.
 - **Label every Docker container** you start with `--label swarm=<your agent name>`.
 - **Record every background process** you start in `NOTEBOOK.md`, so humans can shut everything down at the end.
-- **The swarm has a hard end time** (`SWARM_END`). When any tool returns `swarm_ended`, stop immediately.
+- **The swarm has no fixed end time.** Humans can set one on the board, and will say in `#general` when to finalize. When any tool returns `swarm_ended`, stop immediately.
 
 ## Hard rules
 

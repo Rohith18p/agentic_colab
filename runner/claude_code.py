@@ -77,6 +77,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import httpx
 
 from .agent import Agent, AgentContext
 from .client import ToolCallError, WorkspaceClient, WorkspaceUnreachable
@@ -470,6 +471,24 @@ class ClaudeCodeAgent(Agent):
             log.info("%s: settings from agent.env: %s", agent_name, changed)
             self._announced_stop = False  # a raised limit lets the agent start shifts again
 
+    async def _sync_end(self, ctx: AgentContext) -> None:
+        """The board's end time wins over SWARM_END, so humans can move or remove it while agents run.
+        If the board can't be reached, keep the last value."""
+        base = ctx.client.url.rstrip("/").removesuffix("/mcp")
+        try:
+            async with httpx.AsyncClient(timeout=10) as http:
+                r = await http.get(f"{base}/api/settings")
+            if r.status_code != 200:
+                return
+            value = r.json().get("swarm_end")
+        except (httpx.HTTPError, ValueError):
+            return
+        end = parse_end(value.replace("Z", "+00:00")) if value else None
+        if end != self.end:
+            log.info("%s: swarm end from the board: %s", ctx.agent_name, end.isoformat() if end else "none")
+            self.end = end
+            self._announced_stop = False
+
     def _past_end(self) -> bool:
         return self.end is not None and datetime.now(timezone.utc) >= self.end
 
@@ -490,6 +509,7 @@ class ClaudeCodeAgent(Agent):
             os.environ["RUNNER_SHIFTS_THIS_RUN"] = str(self._shifts_this_run)
             os.execv(sys.executable, [sys.executable, "-m", "runner"])
         self._reload_settings(ctx.agent_name)
+        await self._sync_end(ctx)
         if self._past_end():
             log.warning("%s: SWARM_END (%s) has passed; stopping for good", ctx.agent_name, self.end.isoformat())
             self.done = True
